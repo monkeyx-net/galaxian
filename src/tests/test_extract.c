@@ -2,7 +2,8 @@
  * The extractor against the user's galaxian set (label rom):
  *   test_extract <galaxian.zip or folder> <scratch dir>
  * Two extractions are byte-identical and hold every file; the graphics and
- * palette read back from them (gfx/galaxian.c) are the ROM set's; the font
+ * palette read back from them (gfx/galaxian.c) are the ROM set's, and the
+ * tables (the ROM's bytes in their ranges, nothing else); the font
  * matches what the attract mode draws on the emulated board ("WE ARE THE
  * GALAXIANS": each letter's tile code and its pixels on screen); and with
  * no ROM set nothing is written, not even a manifest.
@@ -31,6 +32,7 @@ static int failures;
 static const char *const files[] = {
     "manifest.txt", "gfx/tiles.txt", "gfx/palette.txt", "gfx/font.txt",
     "gfx/tiles.png", "gfx/sprites.png", "gfx/game_over.png", "gfx/score_table.png", "gfx/demo.png",
+    "tables.txt",
 };
 #define FILES ((int)(sizeof files / sizeof files[0]))
 
@@ -140,6 +142,17 @@ int main(int argc, char **argv)
     CHECK(!memcmp(from_assets.planes, rom.gfx, sizeof rom.gfx), "the tiles read back are not the ROM's");
     CHECK(!memcmp(from_assets.palette, from_rom.palette, sizeof from_rom.palette), "the palette read back is not the PROM's");
     check_font(a);
+    static uint8_t tables[0x2800];
+    CHECK(!extract_load_tables(a, tables, sizeof tables), "cannot read the tables back");
+    long bad = 0, n = 0;
+    for (unsigned addr = 0; addr < sizeof tables; addr++)
+        if (extract_is_table(addr)) {
+            n++;
+            if (tables[addr] != rom.program[addr]) bad++;
+        } else if (tables[addr]) {
+            bad++;
+        }
+    CHECK(n > 500 && !bad, "the tables read back: %ld of %ld bytes differ from the ROM's", bad, n);
 
     err[0] = '\0';
     CHECK(extract_all(&none, c, err, sizeof err) == -1 && err[0], "extract without a ROM set did not fail");

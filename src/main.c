@@ -46,6 +46,9 @@
 #include "platform/audio.h"
 #include "platform/input.h"
 #include "platform/video.h"
+#include "sim/boot.h"
+#include "sim/frame.h"
+#include "sim/game.h"
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -56,6 +59,14 @@
 #define MAX_STEPS_PER_PRESENT 4
 #define GFX_NOTICE_FRAMES 120
 #define SETTINGS_FILE "galaxian.cfg"
+#define HISCORE_FILE "galaxian.hiscore"
+#define HISCORE_SAVE_FRAMES 300 /* a new high score is written at most every 5 s */
+#define SETUP_FRAMES 87         /* the board's power-on checks before its set-up is done */
+/* The controls page, shown over the attract mode when nobody has touched the
+   controls for CONTROLS_IDLE_FRAMES; it stays CONTROLS_SHOW_FRAMES and comes
+   back every CONTROLS_IDLE_FRAMES + CONTROLS_SHOW_FRAMES. Any input hides it. */
+#define CONTROLS_IDLE_FRAMES (30 * FRAME_HZ)
+#define CONTROLS_SHOW_FRAMES (10 * FRAME_HZ)
 
 #define WHITE 0xFFFFFFu
 #define GREY 0x606060u
@@ -77,12 +88,17 @@ typedef struct {
     int coins;
     char rom_path[1024];
     char rom_error[256];
-    char assets_path[1024]; /* the extracted assets, or "" */
+    char assets_path[1200]; /* the extracted assets, or "" */
     RomSet rom;
     int test_card;       /* --test-card, or no ROM: the card instead of the game */
     Board board;
     uint8_t dips;        /* IN2, and IN1's coinage bits */
     uint8_t coinage;
+    int c_game;          /* the game written in C (the default), not the board (--emulate) */
+    long idle;           /* frames of attract mode without input (the controls page) */
+    uint8_t hiscore[3];  /* $40A8-$40AA as last saved (BCD, $40AA the top digits) */
+    int hiscore_placed;  /* put into the game's RAM after its power-on */
+    int hiscore_wait;
 } Port;
 
 static Port g;
@@ -208,6 +224,190 @@ static void board_inputs(const InputFrame *in)
     g.board.in2 = g.dips;
 }
 
+/* ---- the high score ------------------------------------------------------------ */
+
+/* The arcade forgets its high score at power-off; the port keeps it. */
+static void hiscore_place(uint8_t *ram)
+{
+    if (g.hiscore_placed) return;
+    g.hiscore_placed = 1;
+    memcpy(ram + 0xA8, g.hiscore, 3);
+}
+
+static int hiscore_above(const uint8_t *a, const uint8_t *b)
+{
+    for (int i = 2; i >= 0; i--)
+        if (a[i] != b[i]) return a[i] > b[i];
+    return 0;
+}
+
+static void hiscore_check(const uint8_t *ram, int now)
+{
+    if (!g.hiscore_placed || !hiscore_above(ram + 0xA8, g.hiscore)) return;
+    if (!now && --g.hiscore_wait > 0) return;
+    memcpy(g.hiscore, ram + 0xA8, 3);
+    if (save_store(HISCORE_FILE, g.hiscore, 3)) fprintf(stderr, "galaxian: cannot save %s\n", save_path(HISCORE_FILE));
+    g.hiscore_wait = HISCORE_SAVE_FRAMES;
+}
+
+/* ---- the game in C -------------------------------------------------------------- */
+
+/* The C game (sim/) runs from the state the ROM's set-up leaves (after the
+   board's SETUP_FRAMES of checks), a frame a tick, reading only the assets:
+   its tables (tables.txt) and, to draw it, the tiles and palette. It is
+   drawn from its tile and object RAM and latches; its sound is the board's
+   circuit model fed by the latches it writes in the frame. */
+static Game cg;
+static uint8_t cg_data[GAME_DATA_SIZE];
+static GalaxianVideo cv;
+static Sound csound;
+static int16_t caudio[BOARD_AUDIO_SAMPLES];
+static struct {
+    uint8_t latch, value;
+} cg_sounds[128];
+static int cg_nsounds;
+static long cg_setup = SETUP_FRAMES;
+static int cg_unported_reported;
+/* the stars' generator restarts when they are turned on, from where the
+   beam is: the game does it in the NMI's attract step, this cycle into the frame */
+#define STARS_ON_CYCLE 10162
+/* the NMI writes the sound latches early in the frame (samples at 48 kHz) */
+#define SOUND_AT_SAMPLE 47
+
+static void cg_write(void *user, uint16_t a, uint8_t v)
+{
+    int latch = -1;
+    if ((a & 0xF800) == 0x6000 && (a & 7) >= 4) latch = SOUND_LFO0 + (a & 3);
+    else if ((a & 0xF800) == 0x6800) latch = SOUND_FS1 + (a & 7);
+    else if ((a & 0xF800) == 0x7800) latch = SOUND_PITCH;
+    if (latch >= 0 && cg_nsounds < (int)(sizeof cg_sounds / sizeof cg_sounds[0])) {
+        cg_sounds[cg_nsounds].latch = (uint8_t)latch;
+        cg_sounds[cg_nsounds].value = v;
+        cg_nsounds++;
+    }
+}
+
+/* the assets: found, or extracted from the ROM set once */
+static int c_assets(const char *argv0)
+{
+    char err[512], dir[1100];
+    if (g.assets_path[0] && !extract_load_tables(g.assets_path, cg_data, sizeof cg_data)) return 0;
+    if (!g.rom.loaded) return -1;
+    if (getenv("GALAXIAN_ASSETS")) snprintf(dir, sizeof dir, "%s", getenv("GALAXIAN_ASSETS"));
+    else {
+        snprintf(dir, sizeof dir, "%s", argv0);
+        char *slash = strrchr(dir, '/');
+        if (slash) snprintf(slash, sizeof dir - (size_t)(slash - dir), "/assets");
+        else snprintf(dir, sizeof dir, "assets");
+    }
+    if (extract_all(&g.rom, dir, err, sizeof err)) { /* the program's folder is read-only: the save folder */
+        snprintf(dir, sizeof dir, "%s", save_path("assets"));
+        if (extract_all(&g.rom, dir, err, sizeof err)) {
+            fprintf(stderr, "galaxian: cannot extract the assets: %s\n", err);
+            return -1;
+        }
+    }
+    snprintf(g.assets_path, sizeof g.assets_path, "%s", dir);
+    printf("galaxian: assets extracted to %s\n", dir);
+    return extract_load_tables(g.assets_path, cg_data, sizeof cg_data);
+}
+
+static int c_start(const char *argv0)
+{
+    if (c_assets(argv0) || galaxian_video_load(&cv, g.assets_path)) return -1;
+    cg.data = cg_data;
+    sound_reset(&csound);
+    for (int i = 0; i < SOUND_LATCHES; i++) sound_write(&csound, i, 0);
+    sound_write(&csound, SOUND_LFO0, 1), sound_write(&csound, SOUND_LFO1, 1);
+    sound_write(&csound, SOUND_LFO2, 1), sound_write(&csound, SOUND_LFO3, 1);
+    sound_write(&csound, SOUND_PITCH, 0xFF);
+    return 0;
+}
+
+static void c_step(const InputFrame *in)
+{
+    if (cg_setup > 0) { /* the power-on checks: a blank screen */
+        if (--cg_setup) return;
+        boot_power_on(&cg);
+        cg.on_write = cg_write;
+        hiscore_place(cg.ram);
+        return;
+    }
+    cg.in0 = (uint8_t)((in->coin ? IN0_COIN1 : 0) | (in->move_x < 0 ? IN0_LEFT : 0) | (in->move_x > 0 ? IN0_RIGHT : 0) |
+                       (in->fire ? IN0_FIRE : 0));
+    cg.in1 = (uint8_t)((in->start ? IN1_START1 : 0) | (in->start2 ? IN1_START2 : 0) | g.coinage);
+    cg.in2 = g.dips;
+    int stars_were = cg.latch7000[4];
+    cg_nsounds = 0;
+    if (frame_run(&cg) && !cg_unported_reported++)
+        fprintf(stderr, "galaxian: the C game reached code not ported ($%04X)\n", cg.unported);
+    hiscore_check(cg.ram, 0);
+    /* drawn from its memory */
+    memcpy(cv.tiles, cg.tiles, sizeof cv.tiles);
+    memcpy(cv.objects, cg.objects, sizeof cv.objects);
+    cv.stars_on = cg.latch7000[4];
+    cv.flip_x = cg.latch7000[6];
+    cv.flip_y = cg.latch7000[7];
+    if (cv.stars_on && !stars_were) {
+        int line = (BOARD_VBLANK_LINE + STARS_ON_CYCLE / BOARD_CYCLES_PER_LINE) % BOARD_LINES;
+        long steps = (long)line * 512 + (long)(STARS_ON_CYCLE % BOARD_CYCLES_PER_LINE) * 6;
+        cv.star_origin = (GALAXIAN_STAR_PERIOD - steps % GALAXIAN_STAR_PERIOD) % GALAXIAN_STAR_PERIOD;
+    }
+    for (int line = GALAXIAN_FIRST_LINE; line <= GALAXIAN_LAST_LINE; line++) galaxian_draw_line(&cv, line);
+    galaxian_to_fb(&cv, &fb);
+    cv.star_origin = (cv.star_origin + GALAXIAN_STAR_PERIOD - 1) % GALAXIAN_STAR_PERIOD;
+    /* heard */
+    sound_render(&csound, caudio, SOUND_AT_SAMPLE);
+    for (int i = 0; i < cg_nsounds; i++) sound_write(&csound, cg_sounds[i].latch, cg_sounds[i].value);
+    sound_render(&csound, caudio + SOUND_AT_SAMPLE, BOARD_AUDIO_SAMPLES - SOUND_AT_SAMPLE);
+    audio_stream(caudio, BOARD_AUDIO_SAMPLES, BOARD_AUDIO_SAMPLES * FRAME_HZ);
+}
+
+/* ---- the controls page ---------------------------------------------------------- */
+
+/* In a game ($4006 bit 0) or not (the attract mode, push start). */
+static int game_running(void) { return (g.c_game ? cg.ram : g.board.ram)[0x006] & 1; }
+
+static bool any_input(const InputFrame *in) { return in->move_x || in->fire || in->coin || in->start || in->start2; }
+
+static bool controls_page_up(void)
+{
+    if (g.test_card || g.idle < CONTROLS_IDLE_FRAMES) return false;
+    return (g.idle - CONTROLS_IDLE_FRAMES) % (CONTROLS_IDLE_FRAMES + CONTROLS_SHOW_FRAMES) < CONTROLS_SHOW_FRAMES;
+}
+
+static const struct { const char *what, *pad, *keys; } CONTROLS[] = {
+    { "LEFT / RIGHT", "STICK, D-PAD", "LEFT RIGHT" },
+    { "FIRE", "A, B", "SPACE, CTRL" },
+    { "COIN", "SELECT", "5" },
+    { "1 PLAYER", "START", "1, ENTER" },
+    { "2 PLAYERS", "L1+START", "2" },
+    { "GRAPHICS", "SELECT+L1", "F3" },
+    { "GLOW, CRT", "", "F4, F5" },
+    { "EXIT", "SELECT+START", "ESC" },
+};
+
+/* Over the game's frame (cosmetic: the next frame is the arcade's again). */
+static void draw_controls(Framebuffer *t)
+{
+    const int x0 = 8, y0 = 40, w = FB_WIDTH - 16, h = 150;
+    fill_rectf_alpha(t, x0, y0, w, h, 0x000000, 0.94);
+    fill_rectf(t, x0, y0, w, 1, ORANGE);
+    fill_rectf(t, x0, y0 + h - 1, w, 1, ORANGE);
+    centred(t, y0 + 8, "GALAXIAN  -  CONTROLS", YELLOW);
+    int y = y0 + 22;
+    debug_text(t, x0 + 74, y, "PAD", CYAN);
+    debug_text(t, x0 + 140, y, "KEYBOARD", CYAN);
+    y += 12;
+    for (size_t i = 0; i < sizeof CONTROLS / sizeof CONTROLS[0]; i++, y += 9) {
+        debug_text(t, x0 + 6, y, CONTROLS[i].what, WHITE);
+        debug_text(t, x0 + 74, y, CONTROLS[i].pad, GREEN);
+        debug_text(t, x0 + 140, y, CONTROLS[i].keys, GREEN);
+    }
+    centred(t, y0 + h - 26, "PLAYERS TAKE TURNS", GREY);
+    centred(t, y0 + h - 12, "CONVERTED BY MONKEYX", CYAN);
+}
+
 /* Classic: the arcade frame. HD: drawn at the render scale. FILTER: the arcade
    frame upscaled whole. Glow goes over whichever is shown. */
 static void draw(int display_scale)
@@ -216,7 +416,8 @@ static void draw(int display_scale)
     const Scaler scaler = gs->smooth ? SCALER_SMOOTH : SCALER_CRISP;
     const int s = gfx_render_scale(gs, display_scale);
     shown = &fb;
-    if (!g.test_card) { /* the board's picture, already in fb; only pixels, so HD upscales it like FILTER */
+    if (!g.test_card) { /* the game's picture, already in fb; only pixels, so HD upscales it like FILTER */
+        if (controls_page_up()) draw_controls(&fb);
         if (g.gfx_notice > 0) {
             char text[80];
             snprintf(text, sizeof text, "GRAPHICS: %s", gfx_describe(&g.gfx));
@@ -244,12 +445,18 @@ static void step(const InputFrame *in)
     static bool coin_was;
     g.clock++;
     g.in = *in;
-    if (!g.test_card) {
+    if (g.c_game) {
+        c_step(in);
+        g.idle = game_running() || any_input(in) ? 0 : g.idle + 1;
+    } else if (!g.test_card) {
         board_inputs(in);
         board_run_frame(&g.board);
+        if (g.board.frame > SETUP_FRAMES) hiscore_place(g.board.ram); /* after the set-up has cleared RAM */
+        hiscore_check(g.board.ram, 0);
         galaxian_to_fb(&g.board.video, &fb);
         /* a board frame's sound (1/60.606 s) plays in the tick's 1/60 s, as the game runs 1% slow */
         audio_stream(g.board.audio, BOARD_AUDIO_SAMPLES, BOARD_AUDIO_SAMPLES * FRAME_HZ);
+        g.idle = game_running() || any_input(in) ? 0 : g.idle + 1;
     }
     if (in->coin && !coin_was) g.coins++;
     coin_was = in->coin;
@@ -437,6 +644,7 @@ int main(int argc, char **argv)
 {
     bool windowed = false;
     const char *rom_arg = NULL;
+    g.c_game = 1;
     if (argc == 3 && !strcmp(argv[1], "--check-rom")) return check_rom(argv[2]);
     if (argc == 5 && !strcmp(argv[1], "--dump-rom")) return dump_rom(argv[2], argv[3], argv[4]);
     if ((argc == 3 || argc == 4) && !strcmp(argv[1], "--extract")) return extract(argv[0], argv[2], argc == 4 ? argv[3] : NULL);
@@ -446,7 +654,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) screenshot = argv[++i];
         else if (!strcmp(argv[i], "--rom") && i + 1 < argc) rom_arg = argv[++i];
         else if (!strcmp(argv[i], "--test-card")) g.test_card = 1;
-        else if (!strcmp(argv[i], "--emulate")) {} /* the only game so far */
+        else if (!strcmp(argv[i], "--emulate")) g.c_game = 0;
         else if (!strcmp(argv[i], "--input") && i + 1 < argc) {
             if (load_script(argv[++i])) return 2;
         }
@@ -476,10 +684,16 @@ int main(int argc, char **argv)
     if (g.rom_path[0] && rom_load(&g.rom, g.rom_path, g.rom_error, sizeof g.rom_error))
         fprintf(stderr, "galaxian: %s\n", g.rom_error);
     if (assets_find(argv[0], EXTRACT_MANIFEST, g.assets_path, sizeof g.assets_path)) g.assets_path[0] = '\0';
-    if (!g.rom.loaded) g.test_card = 1; /* nothing to run: show why */
+    if (save_load(HISCORE_FILE, g.hiscore, 3)) memset(g.hiscore, 0, 3);
+    if (g.test_card) g.c_game = 0;
+    if (g.c_game && c_start(argv[0])) {
+        if (g.rom.loaded) fprintf(stderr, "galaxian: no assets for the game in C: the board runs the ROM\n");
+        g.c_game = 0;
+    }
+    if (!g.c_game && !g.rom.loaded) g.test_card = 1; /* nothing to run: show why */
     if (!g.test_card) {
         settings_load();
-        board_init(&g.board, &g.rom);
+        if (!g.c_game) board_init(&g.board, &g.rom);
     }
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0) {
@@ -503,6 +717,7 @@ int main(int argc, char **argv)
 #endif
     while (run_once()) {}
 
+    if (!g.test_card) hiscore_check(g.c_game ? cg.ram : g.board.ram, 1);
     audio_shutdown();
     input_shutdown();
     video_shutdown();

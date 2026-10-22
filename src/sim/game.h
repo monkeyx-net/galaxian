@@ -40,6 +40,7 @@ typedef struct Game {
     uint8_t in0, in1, in2;   /* the switches: IN0 $6000, IN1 $6800, the DIP switches $7000 */
     const uint8_t *data;     /* GAME_DATA_SIZE bytes indexed by ROM address */
     uint16_t unported;       /* the ROM address the C game last reached unported, or 0 */
+    uint8_t *data_read;      /* optional, for tools: a flag per ROM byte the game reads */
     /* optional, for tests: called before each write */
     void (*on_write)(void *user, uint16_t addr, uint8_t value);
     void *user;

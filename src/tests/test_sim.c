@@ -359,6 +359,11 @@ static void step(Board *b)
                      (prev_pc < rt->addr || prev_pc >= rt->addr + 0x80);
         if (!called && !jumped) continue;
         if (npending == (int)(sizeof pending / sizeof pending[0])) break;
+        /* past 20000 checks a routine is checked 1 call in 64 (the main loop's run millions) */
+        if (rt->checked > 20000 && ((rt->checked + rt->interrupted) & 63)) {
+            rt->interrupted++;
+            continue;
+        }
         Pending *p = &pending[npending++];
         p->rt = rt;
         p->sp = c->sp;

@@ -15,6 +15,26 @@
 #include "emu/board.h"
 #include "gfx/galaxian.h"
 
+/* The program ROM's tables the game in C reads, by address. */
+static const struct {
+    unsigned first, last;
+    const char *what;
+} tables[] = {
+    { 0x0152, 0x0155, "the bonus ship's scores, by the DIP switches" },
+    { 0x039A, 0x03AE, "the score table's points" },
+    { 0x051B, 0x053A, "a player's start: the swarm and the settings" },
+    { 0x15E3, 0x15F3, "the lone attacks' timers" },
+    { 0x17A9, 0x17CF, "the tunes' pitches and lengths" },
+    { 0x1A45, 0x1A54, "the demo pilot's weights" },
+    { 0x1CF6, 0x1D27, "the settings' lines" },
+    { 0x1D71, 0x1DE0, "colours" },
+    { 0x1E00, 0x1F8F, "the dives' arcs, the tunes, the settings' texts" },
+    { 0x2157, 0x215E, "the swarm's pictures" },
+    { 0x22D0, 0x22F0, "the scores" },
+    { 0x235C, 0x24B6, "the texts" },
+};
+#define TABLES ((int)(sizeof tables / sizeof tables[0]))
+
 #define TILES 256
 #define SPRITES 64
 /* the attract mode's screens for the previews (the emulated board's frames) */
@@ -187,6 +207,50 @@ static int extract_font(const char *dir, char *err, int errlen)
     return write_text(gfx, "font.txt", &t, err, errlen);
 }
 
+/* ---- tables ------------------------------------------------------------------ */
+
+int extract_is_table(unsigned addr)
+{
+    for (int i = 0; i < TABLES; i++)
+        if (addr >= tables[i].first && addr <= tables[i].last) return 1;
+    return 0;
+}
+
+static int extract_tables(const RomSet *rom, const char *dir, char *err, int errlen)
+{
+    Text t = {0};
+    for (int i = 0; i < TABLES; i++) {
+        put(&t, "# %s\n", tables[i].what);
+        for (unsigned a = tables[i].first; a <= tables[i].last; a += 16) {
+            put(&t, "%04X:", a);
+            for (unsigned b = a; b < a + 16 && b <= tables[i].last; b++) put(&t, " %02X", rom->program[b]);
+            put(&t, "\n");
+        }
+    }
+    return write_text(dir, "tables.txt", &t, err, errlen);
+}
+
+int extract_load_tables(const char *dir, uint8_t *data, unsigned size)
+{
+    char path[1200], line[256];
+    snprintf(path, sizeof path, "%s/tables.txt", dir);
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    memset(data, 0, size);
+    unsigned n = 0;
+    while (fgets(line, sizeof line, f)) {
+        unsigned a, v;
+        int k;
+        if (line[0] == '#' || sscanf(line, "%x:%n", &a, &k) != 1) continue;
+        for (const char *p = line + k; sscanf(p, "%x%n", &v, &k) == 1; p += k, a++)
+            if (a < size) data[a] = (uint8_t)v, n++;
+    }
+    fclose(f);
+    unsigned want = 0;
+    for (int i = 0; i < TABLES; i++) want += tables[i].last - tables[i].first + 1;
+    return n == want ? 0 : -1;
+}
+
 /* ---- the attract mode's screens ------------------------------------------------ */
 
 static Board board;
@@ -229,7 +293,8 @@ int extract_all(const RomSet *rom, const char *out_dir, char *err, int errlen)
         return -1;
     }
     if (extract_tiles(rom, out_dir, err, errlen) || extract_palette(rom, out_dir, err, errlen) ||
-        extract_font(out_dir, err, errlen) || extract_screens(rom, out_dir, err, errlen))
+        extract_font(out_dir, err, errlen) || extract_tables(rom, out_dir, err, errlen) ||
+        extract_screens(rom, out_dir, err, errlen))
         return -1;
     Text t = {0};
     put(&t, "galaxian assets %d\n", EXTRACT_VERSION);

@@ -4,7 +4,9 @@ uint8_t game_rd(const Game *g, uint16_t a)
 {
     switch (a >> 11) {
     case 0x0: case 0x1: case 0x2: case 0x3: case 0x4: case 0x5: case 0x6: case 0x7:
-        return a < GAME_DATA_SIZE && g->data ? g->data[a] : 0;
+        if (a >= GAME_DATA_SIZE || !g->data) return 0;
+        if (g->data_read) g->data_read[a] = 1;
+        return g->data[a];
     case 0x8: return g->ram[a & 0x3FF];
     case 0xA: return g->tiles[a & 0x3FF];
     case 0xB: return g->objects[a & 0xFF];

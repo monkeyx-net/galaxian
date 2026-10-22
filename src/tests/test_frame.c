@@ -15,13 +15,15 @@
  * return and its dispatcher ($200A) is written to the C model after its
  * NMI. Tile RAM is compared by picture ($10, $2C-$2F, $40, $42 and $CA are
  * all blank; the game never reads tile RAM back).
- * The controls: the attract mode, coins, a one-player game played by an
+ * Every ROM byte the C game reads must be in a table the extractor writes
+ * (assets/extract.c). The controls: the attract mode, coins, a one-player game played by an
  * autopilot to its end, a two-player game, as test_sim's runs.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "assets/extract.h"
 #include "assets/rom.h"
 #include "emu/board.h"
 #include "sim/boot.h"
@@ -32,6 +34,7 @@
 static RomSet rom;
 static Board board;
 static Game cg;
+static uint8_t data_read[GAME_DATA_SIZE]; /* DATA_READ=file: the ROM bytes the C game read */
 
 /* ---- the race between the NMI and the main loop ------------------------------- */
 
@@ -163,6 +166,7 @@ int main(int argc, char **argv)
     cg.data = rom.program;
     cg.in0 = board.in0, cg.in1 = board.in1, cg.in2 = board.in2;
     boot_power_on(&cg);
+    cg.data_read = data_read;
     char when[64];
     snprintf(when, sizeof when, "power-on (frame %ld)", (long)board.frame);
     long d = compare(when);
@@ -197,6 +201,18 @@ int main(int argc, char **argv)
                     board.ram[5], board.ram[0xA], board.ram[0x25F], board.ram[0xA1], board.cpu.pc);
         }
         else matched++;
+    }
+    long outside = 0;
+    for (unsigned a = 0; a < GAME_DATA_SIZE; a++)
+        if (data_read[a] && !extract_is_table(a)) {
+            if (outside++ < 8) fprintf(stderr, "the C game read ROM $%04X, in no table the extractor writes\n", a);
+            failed = 1;
+        }
+    if (getenv("DATA_READ")) {
+        FILE *f = fopen(getenv("DATA_READ"), "w");
+        for (unsigned a = 0; f && a < GAME_DATA_SIZE; a++)
+            if (data_read[a]) fprintf(f, "%04X\n", a);
+        if (f) fclose(f);
     }
     printf("frame: %ld frames of the C game alone equal the board's%s (%ld with an NMI breaking into the main loop's work, %ld of them its RAM)\n",
            matched, failed ? " (then a difference)" : "", races, ram_races);

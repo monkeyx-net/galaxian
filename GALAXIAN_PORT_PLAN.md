@@ -176,6 +176,62 @@ from these measurements (generated: nothing from the ROM set). A sample at
 - Not modelled: MAME's thump at power-on as its filters charge (the
   first half second).
 
+### 2.3 The game program (C0-C1, all ported: `src/sim/`)
+
+Read from MAME's disassembly (`dasm_probe.lua`, merged with the
+instructions the board runs; `build/re`, never committed). Nearly all of
+the game runs in the NMI; the main loop draws.
+- Reset ($0000 -> $1A55): the tile and object RAM and the latches
+  cleared, RAM checked 32 times ($1A98: a pattern of +$2F a byte, +1 a
+  page), tile RAM likewise, the ROM's sum ($1B70); then RAM set up
+  ($1B8A: $4000-$40BF 0, the queue $40C0-$40FF $FF, $4100-$439F 0), SP
+  $4400, $401A = 3, NMI on, and the main loop ($2000). On the board this
+  takes 87 frames; the first NMI comes at frame 88 (`boot_power_on` is the
+  state then).
+- NMI ($0066): AF BC DE HL IX IY pushed, $7001 = 0. With $401A set, the
+  boot modes ($1BCD: 3 checks object RAM for 32 frames, then OK; 1 shows
+  the settings and sounds the controls while the service switch is on; 2
+  draws the crosshatch, then the game, $401A = 0, state 0). Otherwise: the
+  object RAM's copy $4020-$409F out to $5800-$587F, the switches' history
+  ($4010-$4016: IN0 now / last / 2 and 3 frames back, IN1, DIP), the
+  service switch resets, the frame counter $425F counts down, then coins
+  ($18EF, $1931, $197C), the sound sequencer ($16F5), the LFO ($1898),
+  the typewriter ($18C0), and the state $4005 through RST $28 (state 0
+  the screen cleared and the settings read; 1 the attract mode, 19 steps
+  at $0164; 2 push start, 4 steps at $0400 then $0492's start check; 3
+  and 4 a player's turn, 8 steps at $0540 / $0785). $7001 = 1 at the end.
+- RST helpers: $08 returns from the caller in the demo ($4007 bit 0), $10
+  fills B bytes (B = 0: 256, and leaves B 0), $18 fills B x C, $20 reads
+  table HL + A, $28 jumps through the word table after it by A. $003C
+  steps the random number $401E (x 5 + 1), $0048 divides A by D (the
+  quotient in C).
+- The main loop ($2000): commands queued by $08F2 (two bytes at $40A0's
+  slot, $40C0-$40FF, $FF free) are taken at $40A1 and run through $203D
+  (0 an alien drawn in the swarm, 1 erased, 2 the ship's explosion frame,
+  3 a score added in BCD from $22D0 with the bonus ship and the high
+  score, 4 scores cleared, 5 drawn, 6 a text from $235C, +$80 erased with
+  tile $40, +$40 typed by the NMI scrolling its column, 7 the flags,
+  credits, bonus line or ships left); with none, $2067 animates the
+  swarm a column a frame ($425F & 15) and blinks the 1UP. An NMI often
+  breaks into this work, which then finishes after it (`frame`).
+- RAM: $4000 coinage, $4002 credits, $4004 coins counted, $4005 state,
+  $4006 in a game, $4007 attract, $4008/$4009 counters, $400A step, $400B
+  a screen pointer, $400D the player, $400E two players, $400F cocktail,
+  $4010-$4016 switches, $4018 flipped, $401A boot mode, $401E random,
+  $401F 3 lives; $4020-$409F the object RAM's copy (columns' scroll and
+  colour, sprites, shells); $40A2/$40A5 the scores, $40A8 the high score
+  (BCD, 3 bytes), $40AC the bonus threshold, $40AD/$40AE bonus given,
+  $40B0-$40B5 the typewriter, $40C0-$40FF the queue; $4100-$417F the
+  swarm (a byte a cell: rows of 16, cells $x3-$xC, rows 2-7: blue, blue,
+  blue, purple, red, flagships); $4180/$41A0 the players' saved swarms
+  and settings (packed bits, then $4218-$421F: $421D ships left);
+  $41C0-$41DF the sound requests; $41E8-$41FC the swarm's rows and
+  columns; $4200-$4215 the ship ($4200 alive, $4201 exploding, $4202 x),
+  the missile ($4208-$420B), the sway ($420D-$4211), shots ($4213-$4214),
+  the side ($4215); $4218-$424F the attack timers and aggression
+  ($421A, $421B wave, $421C waves played); $4260 14 shells of 5 bytes;
+  $42B0 8 flying slots of 32 bytes; the stack from $4400 down.
+
 ### 2.2 Graphics in the ROM set (X1, `extract`)
 
 - The 256 tiles of 1h/1k hold the font at $00-$2B: the hex digits 0-F
@@ -188,8 +244,9 @@ from these measurements (generated: nothing from the ROM set). A sample at
   `gfx/font.txt` (the character codes), previews (tiles, sprites, three of
   the attract mode's screens from the emulated board) and `manifest.txt`
   last. `gfx/galaxian.c` reads the tiles and palette back
-  (`galaxian_video_load`) for the game in C. Tables follow as the C game
-  needs them (C phases), naming ROM addresses only.
+  (`galaxian_video_load`) for the game in C, and `tables.txt` holds the
+  program ROM's tables it reads (ranges listed in `extract.c`: texts,
+  scores, colours, tunes, the dives' arcs, timers, the demo's weights).
 
 ## 3. Phases
 
@@ -199,7 +256,7 @@ from these measurements (generated: nothing from the ROM set). A sample at
 | E1 | Z80, board, video, stars; the game plays via `--emulate` (silent at first) | `mame_emu`: Z80 cycle for cycle over 100 traced frames; RAM and pictures equal at ~12 frames (`mame_capture`) | done 2026-10-22 |
 | E2 | Discrete sound model | each sound latch audibly right, its timing as MAME's wav | done 2026-10-22 |
 | X1 | Extractor | `extract` | done 2026-10-22 |
-| C0-C3 | RE notes; the C game piece by piece, then the default | `sim`, `game`, `routines`, `frame`; the C game plays from power-on through game over | |
+| C0-C3 | RE notes; the C game piece by piece, then the default | `sim`, `game`, `routines`, `frame`; the C game plays from power-on through game over | done 2026-10-22 (`routines` to come) |
 | E3/E4 | Polish (cocktail flip, devices, web), high-score saving, release | device checklist; published | |
 
 Each phase gets its own commit. Nothing is pushed or published without
@@ -234,7 +291,30 @@ asking.
   every file; the tiles and palette read back are the ROM set's; the font
   matches the attract mode's "GALAXIANS" on the emulated board (each
   letter's code and its pixels); no manifest without a ROM set
-- Later: `sim`, `game`, `routines`, `frame` (as Defender's).
+- `sim` - label `rom`: two scripted runs on the board (the attract mode,
+  coins, one- and two-player games; then an autopilot that hunts the
+  aliens and dodges the shells, its ships topped up to reach later waves).
+  Every ported routine (the NMI and the states included) is checked at
+  every call: a model loaded from the board runs the C routine and must
+  equal the board's memory and latches (RAM bar the stack below the entry
+  SP) and the output registers when the ROM's returns. Entries are a CALL
+  or RST, or a JP (also JP (HL)) from outside; calls an NMI (or the
+  autopilot's top-up) breaks into are not checked; past 20000 checks a
+  routine is checked 1 call in 64. `COVER=file` writes the instructions run.
+- `frame` - label `rom`: the C power-on equals the board when its set-up is
+  done (frame 88); from there the C game alone runs each frame (the NMI's
+  work, then the main loop's) with the board's switches and equals the
+  board at every frame's end (RAM bar $43C0-$43FF, tile RAM by picture,
+  object RAM, latches) over 60000 frames (attract, a one-player and a
+  two-player game played by the autopilot to their end). It is given the
+  race between the NMI and the main loop (what the board's main loop
+  writes between the NMI's return and its dispatcher, $200A, is written to
+  the C model after its NMI). Every ROM byte the C game reads must be in a
+  table the extractor writes.
+- The game test of the plan (all RAM at each step) is the NMI's check in
+  `sim` (the whole state at every NMI's return).
+- Later: `routines` (ROM routines from random states against the C ones,
+  for paths the scripted play rarely reaches).
 - Probes that are not tests: `ram_probe.lua`-style dumps come from
   `capture_probe.lua` (`PROBE_FRAMES`, `PROBE_POKE`); `test_emu` takes
   `DUMP_DIR` (its pictures), `OBJECT_LOG=frame` (object RAM line by line),

@@ -4,10 +4,15 @@ A C11 / SDL2 port of the 1979 Namco arcade game for Linux handhelds
 (PortMaster: ArkOS, ROCKNIX, muOS, Knulli), desktops (Linux, Windows, macOS) and the
 web, checked against the original ROM running in MAME.
 
-**Status:** phase P0: the skeleton (platform layer, ROM loader, test card,
-packaging, CI and the MAME test harness). Next: the emulated Galaxian
-board (Z80, video, starfield), then the discrete sound, the asset
-extractor and the game rewritten in C. See
+**Status:** playable. The game is rewritten in C, routine by routine,
+checked against the ROM running on an emulated Galaxian board (Z80, video,
+starfield; itself checked against MAME cycle for cycle and pixel for
+pixel); the C game alone equals the board frame for frame through
+scripted games. It reads only the assets `--extract` writes once from
+your ROM set. The sound is a model of the board's discrete circuit,
+measured from MAME. `--emulate` runs the ROM's own code on the emulated
+board instead. The port adds enhanced graphics presets, pad controls,
+the DIP switches in a settings file and high-score saving. See
 [GALAXIAN_PORT_PLAN.md](GALAXIAN_PORT_PLAN.md).
 
 You need your own MAME `galaxian` ROM set (`galaxian.zip`); none is included.
