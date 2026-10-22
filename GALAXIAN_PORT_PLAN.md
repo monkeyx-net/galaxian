@@ -131,7 +131,17 @@ play; RAM, tile and object RAM, latches and every pixel at 14 frames):
 - The watchdog (probe): 8 vertical blanks without a read of $7800 reset
   the board (the CPU and the latches; RAM keeps its contents).
 
-To confirm: the flip latches ($7006/$7007, the cocktail cabinet).
+- Flip (the cocktail table, player two's turns: the game sets $7006 and
+  $7007 together; `mame_emu`'s second run): MAME's flipped picture is the
+  unflipped one turned 180 degrees for the tiles and sprites: line L
+  shows line 255 - L ($7007) and the pixels along it the other way round
+  ($7006). The first three sprites stay a line late in that flipped
+  count; the shells' lines follow the flip but their pixels along a line
+  do not (the game mirrors those itself), and the first three shells are
+  a line late on the beam. Stars are never flipped, and while flipped
+  their origin moves on a step a frame instead of back.
+- Sprites are not drawn before pixel 17 along a line (in the flip's
+  count).
 
 ### 2.1 Sound (E2, measured from MAME's output)
 
@@ -257,7 +267,7 @@ the game runs in the NMI; the main loop draws.
 | E2 | Discrete sound model | each sound latch audibly right, its timing as MAME's wav | done 2026-10-22 |
 | X1 | Extractor | `extract` | done 2026-10-22 |
 | C0-C3 | RE notes; the C game piece by piece, then the default | `sim`, `game`, `routines`, `frame`; the C game plays from power-on through game over | done 2026-10-22 |
-| E3/E4 | Polish (cocktail flip, devices, web), high-score saving, release | device checklist; published | |
+| E3/E4 | Polish (cocktail flip, devices, web), high-score saving, release | device checklist; published | flip, high score and the cabinet setting done 2026-10-22; devices, release to come |
 
 Each phase gets its own commit. Nothing is pushed or published without
 asking.
@@ -280,6 +290,9 @@ asking.
   snapshot at 14 frames; the static frames drawn from the dump
   (`gfx/galaxian.c`) equal MAME's snapshots (bar the stars)
 - `mame_emu` - label `mame`: the board replays the script from power-on.
+  A second capture runs a two-player game on the cocktail table (the
+  Cabinet switch through `PROBE_FIELDS`): every frame every 50 equals
+  MAME's, player two's flipped ones included.
   MAME's instruction trace of frames 1600-1700 (`trace_probe.lua`): the
   Z80 cycle for cycle. At every captured frame RAM (bar the stack,
   $43C0-$43FF), tile and object RAM, the latches and the picture (MAME's

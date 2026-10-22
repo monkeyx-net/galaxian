@@ -85,6 +85,7 @@ static void log_write(Board *b, uint16_t addr, uint8_t v)
 }
 
 static long input_delay = 1; /* frames from a probe's callback to the game */
+static uint8_t in0_or;       /* IN0_OR=hex: switches held throughout (the cocktail cabinet, 20) */
 
 static FILE *object_log;
 static long object_log_frame = -1;
@@ -100,7 +101,7 @@ static void script(Board *b, int line)
     long f = (long)b->frame - input_delay; /* the probe's frame number whose inputs apply now */
     for (int i = 0; i < nsteps; i++)
         if (steps[i].frame == f) {
-            b->in0 = steps[i].in0;
+            b->in0 = steps[i].in0 | in0_or;
             b->in1 = steps[i].in1;
         }
 }
@@ -411,6 +412,7 @@ int main(int argc, char **argv)
         object_log = fopen("object.log", "w");
     }
     if (getenv("INPUT_DELAY")) input_delay = atol(getenv("INPUT_DELAY"));
+    if (getenv("IN0_OR")) in0_or = (uint8_t)strtoul(getenv("IN0_OR"), NULL, 16);
     char path[1200];
     trace_from = strtol(argv[5], NULL, 10);
     trace_to = strtol(argv[6], NULL, 10);
@@ -423,6 +425,7 @@ int main(int argc, char **argv)
         }
     }
     board_init(&board, &rom);
+    board.in0 = in0_or;
     board.line_hook = script;
     if (getenv("WRITE_LOG")) {
         write_log_addr = (unsigned)strtoul(getenv("WRITE_LOG"), NULL, 16);
@@ -475,6 +478,6 @@ int main(int argc, char **argv)
     }
     if (with_trace && compare_main()) failed = 1;
     snprintf(path, sizeof path, "%s/game.wav", argv[3]);
-    if (compare_sound(path)) failed = 1;
+    if (!getenv("NO_SOUND") && compare_sound(path)) failed = 1;
     return failed;
 }

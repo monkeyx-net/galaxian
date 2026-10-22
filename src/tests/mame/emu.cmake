@@ -40,3 +40,19 @@ execute_process(COMMAND "${CHECK}" "${ROM}" "${capture_script}" "${WORKDIR}/capt
 if(NOT rc EQUAL 0)
   message(FATAL_ERROR "the emulated board differs from MAME")
 endif()
+
+# the cocktail table's run: the Cabinet switch held, no trace, no sound
+set(ENV{IN0_OR} 20)
+set(ENV{NO_SOUND} 1)
+execute_process(COMMAND "${CHECK}" "${ROM}" "${cocktail_script}" "${WORKDIR}/capture_cocktail" "${traces}" 0 0
+                  ${cocktail_frames}
+                RESULT_VARIABLE rc OUTPUT_VARIABLE out)
+unset(ENV{IN0_OR})
+unset(ENV{NO_SOUND})
+string(REGEX MATCHALL "frame [0-9]+: 0 bytes and 0 pixels" good "${out}")
+list(LENGTH good n_good)
+list(LENGTH cocktail_frames n_frames)
+message(STATUS "cocktail table: ${n_good} of ${n_frames} frames equal MAME's")
+if(NOT rc EQUAL 0)
+  message(FATAL_ERROR "the emulated board differs from MAME on the cocktail table:\n${out}")
+endif()

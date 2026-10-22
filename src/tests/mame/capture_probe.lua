@@ -5,6 +5,7 @@
 --   PROBE_SCRIPT="1200:coin 1215: 1300:start 1400:left,fire ..." mame galaxian -autoboot_script capture_probe.lua
 --
 -- PROBE_POKE="4007=05" writes memory every frame from PROBE_POKE_FROM on.
+-- PROBE_FIELDS="Cabinet=32" sets switches by MAME's names (the DIP switches).
 --
 -- Writes into PROBE_OUT, at each PROBE_FRAMES frame:
 --   frame_<n>.txt   "ram" + the 1 KB at $4000, "tiles" + the 1 KB at $5000,
@@ -37,6 +38,11 @@ for _, port in pairs(manager.machine.ioport.ports) do
 end
 local NAMES = { coin = "Coin 1", start = "1 Player Start", start2 = "2 Players Start",
                 left = "P1 Left", right = "P1 Right", fire = "P1 Button 1" }
+
+local set_fields = {}
+for name, v in string.gmatch(os.getenv("PROBE_FIELDS") or "", "([%w ]+)=(%d+)") do
+    if fields[name] then set_fields[#set_fields + 1] = { field = fields[name], value = tonumber(v) } end
+end
 
 local space = manager.machine.devices[":maincpu"].spaces["program"]
 
@@ -76,12 +82,13 @@ _G.capture_frames = emu.add_machine_frame_notifier(function()
     for _, s in ipairs(script) do
         if s.frame == frame then
             held = {}
-            for what in string.gmatch(s.inputs, "%a+") do held[what] = true end
+            for what in string.gmatch(s.inputs, "%w+") do held[what] = true end
         end
     end
     for what, name in pairs(NAMES) do
         if fields[name] then fields[name]:set_value(held[what] and 1 or 0) end
     end
+    for _, f in ipairs(set_fields) do f.field:set_value(f.value) end
     if frame >= poke_from then
         for _, p in ipairs(pokes) do space:write_u8(p.addr, p.value) end
     end

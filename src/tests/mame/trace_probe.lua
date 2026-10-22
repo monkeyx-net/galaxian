@@ -34,7 +34,7 @@ _G.trace_frames = emu.add_machine_frame_notifier(function()
     for _, s in ipairs(script) do
         if s.frame == frame then
             held = {}
-            for what in string.gmatch(s.inputs, "%a+") do held[what] = true end
+            for what in string.gmatch(s.inputs, "%w+") do held[what] = true end
         end
     end
     for what, name in pairs(NAMES) do

@@ -17,9 +17,12 @@
  *   sprites   8 of 16x16 (object RAM $40-$5F)
  *   shells    7 white and the yellow missile (object RAM $60-$7F)
  *   stars     a 17-bit LFSR, two steps a pixel and 512 a line, its origin
- *             moving back one step a frame (the board sets it when the
- *             stars are turned on); a star shows where bit 0 of the line
- *             differs from bit 3 of the pixel, colour from 6 of its bits
+ *             moving back one step a frame (on one when flipped; the board
+ *             sets it when the stars are turned on); a star shows where
+ *             bit 0 of the line differs from bit 3 of the pixel, colour
+ *             from 6 of its bits; never flipped
+ *   flip      $7007 shows line 255 - L on line L, $7006 the pixels along a
+ *             line the other way round (the cocktail table's second player)
  *   palette   the 32-byte PROM: red and green 3 bits, blue 2 (resistor weights)
  */
 #ifndef GALAXIAN_GFX_GALAXIAN_H

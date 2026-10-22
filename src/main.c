@@ -94,6 +94,7 @@ typedef struct {
     Board board;
     uint8_t dips;        /* IN2, and IN1's coinage bits */
     uint8_t coinage;
+    int cocktail;        /* the Cabinet switch: player two's turns flipped */
     int c_game;          /* the game written in C (the default), not the board (--emulate) */
     long idle;           /* frames of attract mode without input (the controls page) */
     uint8_t hiscore[3];  /* $40A8-$40AA as last saved (BCD, $40AA the top digits) */
@@ -181,7 +182,9 @@ static void draw_scene(Framebuffer *t)
 
 /* The DIP switches, as MAME's defaults unless galaxian.cfg says otherwise:
    lines "coinage 1c1c|2c1c|1c2c|free", "bonus 7000|10000|12000|20000",
-   "lives 2|3". The file is written with the defaults if missing. */
+   "lives 2|3", "cabinet upright|cocktail" (the cocktail table turns the
+   picture for player two). The file is written with the defaults if
+   missing. */
 static void settings_load(void)
 {
     g.dips = IN2_DEFAULT;
@@ -191,7 +194,8 @@ static void settings_load(void)
         static const char defaults[] = "# Galaxian's DIP switches (MAME's defaults)\n"
                                        "coinage 1c1c\n# 1c1c 2c1c 1c2c free\n"
                                        "bonus 7000\n# 7000 10000 12000 20000\n"
-                                       "lives 3\n# 2 3\n";
+                                       "lives 3\n# 2 3\n"
+                                       "cabinet upright\n# upright cocktail\n";
         save_store(SETTINGS_FILE, defaults, sizeof defaults - 1);
         return;
     }
@@ -209,20 +213,27 @@ static void settings_load(void)
         } else if (!strcmp(key, "lives")) {
             if (!strcmp(value, "2")) g.dips &= (uint8_t)~IN2_LIVES3;
             else if (!strcmp(value, "3")) g.dips |= IN2_LIVES3;
+        } else if (!strcmp(key, "cabinet")) {
+            g.cocktail = !strcmp(value, "cocktail");
         }
     }
     fclose(f);
 }
 
-/* The port's controls as the cabinet's switches: one panel, as the upright
-   cabinet (both players use player 1's controls). */
-static void board_inputs(const InputFrame *in)
+/* The port's controls as the cabinet's switches: one panel drives both
+   players' controls (the game reads player two's only on the cocktail
+   table, for player two's turns). */
+static void panel(const InputFrame *in, uint8_t *in0, uint8_t *in1, uint8_t *in2)
 {
-    g.board.in0 = (uint8_t)((in->coin ? IN0_COIN1 : 0) | (in->move_x < 0 ? IN0_LEFT : 0) |
-                            (in->move_x > 0 ? IN0_RIGHT : 0) | (in->fire ? IN0_FIRE : 0));
-    g.board.in1 = (uint8_t)((in->start ? IN1_START1 : 0) | (in->start2 ? IN1_START2 : 0) | g.coinage);
-    g.board.in2 = g.dips;
+    uint8_t left = in->move_x < 0, right = in->move_x > 0, fire = in->fire;
+    *in0 = (uint8_t)((in->coin ? IN0_COIN1 : 0) | (left ? IN0_LEFT : 0) | (right ? IN0_RIGHT : 0) |
+                     (fire ? IN0_FIRE : 0) | (g.cocktail ? IN0_COCKTAIL : 0));
+    *in1 = (uint8_t)((in->start ? IN1_START1 : 0) | (in->start2 ? IN1_START2 : 0) | (left ? IN1_LEFT2 : 0) |
+                     (right ? IN1_RIGHT2 : 0) | (fire ? IN1_FIRE2 : 0) | g.coinage);
+    *in2 = g.dips;
 }
+
+static void board_inputs(const InputFrame *in) { panel(in, &g.board.in0, &g.board.in1, &g.board.in2); }
 
 /* ---- the high score ------------------------------------------------------------ */
 
@@ -333,10 +344,7 @@ static void c_step(const InputFrame *in)
         hiscore_place(cg.ram);
         return;
     }
-    cg.in0 = (uint8_t)((in->coin ? IN0_COIN1 : 0) | (in->move_x < 0 ? IN0_LEFT : 0) | (in->move_x > 0 ? IN0_RIGHT : 0) |
-                       (in->fire ? IN0_FIRE : 0));
-    cg.in1 = (uint8_t)((in->start ? IN1_START1 : 0) | (in->start2 ? IN1_START2 : 0) | g.coinage);
-    cg.in2 = g.dips;
+    panel(in, &cg.in0, &cg.in1, &cg.in2);
     int stars_were = cg.latch7000[4];
     cg_nsounds = 0;
     if (frame_run(&cg) && !cg_unported_reported++)
@@ -355,7 +363,7 @@ static void c_step(const InputFrame *in)
     }
     for (int line = GALAXIAN_FIRST_LINE; line <= GALAXIAN_LAST_LINE; line++) galaxian_draw_line(&cv, line);
     galaxian_to_fb(&cv, &fb);
-    cv.star_origin = (cv.star_origin + GALAXIAN_STAR_PERIOD - 1) % GALAXIAN_STAR_PERIOD;
+    cv.star_origin = (cv.star_origin + (cv.flip_x ? 1 : GALAXIAN_STAR_PERIOD - 1)) % GALAXIAN_STAR_PERIOD;
     /* heard */
     sound_render(&csound, caudio, SOUND_AT_SAMPLE);
     for (int i = 0; i < cg_nsounds; i++) sound_write(&csound, cg_sounds[i].latch, cg_sounds[i].value);

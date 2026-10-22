@@ -167,5 +167,6 @@ void board_run_frame(Board *b)
     b->frame++;
     if (b->latch7000[1]) z80_set_nmi(&b->cpu, 1);
     if (++b->watchdog >= BOARD_WATCHDOG_FRAMES) board_reset(b);
-    b->video.star_origin = (b->video.star_origin + GALAXIAN_STAR_PERIOD - 1) % GALAXIAN_STAR_PERIOD;
+    /* the stars scroll on a step a frame, the other way while flipped */
+    b->video.star_origin = (b->video.star_origin + (b->video.flip_x ? 1 : GALAXIAN_STAR_PERIOD - 1)) % GALAXIAN_STAR_PERIOD;
 }
