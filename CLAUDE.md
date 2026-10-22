@@ -130,6 +130,8 @@ Every change keeps `ctest` green.
 - `sim` - label `rom`: every ported routine checked at every call the ROM
   makes in two scripted runs (one with an autopilot), against a model
   loaded from the board (see the plan)
+- `routines` - label `rom`: ROM routines from random states on the
+  emulated Z80 against the C ones (20000 cases each)
 - `frame` - label `rom`: the C game alone equals the board every frame
   over 60000 frames, given the NMI / main loop race; it reads only the
   extracted tables

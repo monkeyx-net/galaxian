@@ -256,7 +256,7 @@ the game runs in the NMI; the main loop draws.
 | E1 | Z80, board, video, stars; the game plays via `--emulate` (silent at first) | `mame_emu`: Z80 cycle for cycle over 100 traced frames; RAM and pictures equal at ~12 frames (`mame_capture`) | done 2026-10-22 |
 | E2 | Discrete sound model | each sound latch audibly right, its timing as MAME's wav | done 2026-10-22 |
 | X1 | Extractor | `extract` | done 2026-10-22 |
-| C0-C3 | RE notes; the C game piece by piece, then the default | `sim`, `game`, `routines`, `frame`; the C game plays from power-on through game over | done 2026-10-22 (`routines` to come) |
+| C0-C3 | RE notes; the C game piece by piece, then the default | `sim`, `game`, `routines`, `frame`; the C game plays from power-on through game over | done 2026-10-22 |
 | E3/E4 | Polish (cocktail flip, devices, web), high-score saving, release | device checklist; published | |
 
 Each phase gets its own commit. Nothing is pushed or published without
@@ -313,8 +313,13 @@ asking.
   table the extractor writes.
 - The game test of the plan (all RAM at each step) is the NMI's check in
   `sim` (the whole state at every NMI's return).
-- Later: `routines` (ROM routines from random states against the C ones,
-  for paths the scripted play rarely reaches).
+- `routines` - label `rom`: 27 ROM routines (the slots' states, attacks,
+  hit tests, the shells, the sway and survey, the ship, the sounds, the
+  main loop's commands and animation, a state's frame) run on the
+  emulated Z80 from 20000 random states each (plausible values for what
+  they read) until they return, against the C ones on the same memory:
+  for the paths scripted play rarely reaches. Runaways (no return in 2
+  million cycles) and unported code are counted apart.
 - Probes that are not tests: `ram_probe.lua`-style dumps come from
   `capture_probe.lua` (`PROBE_FRAMES`, `PROBE_POKE`); `test_emu` takes
   `DUMP_DIR` (its pictures), `OBJECT_LOG=frame` (object RAM line by line),
