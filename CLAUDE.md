@@ -84,7 +84,9 @@ game will be the default). `--input script.txt` replays controls (lines of
   `savefile.c` (the save folder)
 - `emu/` - the emulated board: `z80.c` (the CPU, each memory access at
   its T-state), `board.c` (memory map, latches, the NMI at vertical blank,
-  lines drawn lazily as MAME does, the starfield generator's restart)
+  lines drawn lazily as MAME does, the starfield generator's restart, the
+  watchdog), `sound.c` (the discrete sound, modelled from MAME's output:
+  tone, swarm, hit, fire; 792 samples a frame)
 - `sim/` - the game in C (C0 on)
 - `tests/` - C tests, MAME probes (`tests/mame/`)
 - `packaging/` - release layout script, PortMaster launcher and metadata
@@ -117,7 +119,8 @@ Every change keeps `ctest` green.
 - `mame_emu` - label `mame`: the board replays that script from power-on:
   MAME's trace of frames 1600-1700 cycle for cycle; RAM (bar the stack
   $43C0-$43FF), tile and object RAM, latches and the picture (MAME's
-  224x768) at every captured frame
+  224x768) at every captured frame; the sound against MAME's recording of
+  the run (levels within 3 dB, the tone alone exact)
 - To debug a difference: `test_emu` with `DUMP_DIR=dir` (its pictures),
   `OBJECT_LOG=frame`, `LATCH_LOG=1`, `WRITE_LOG=addr`; `trace_probe.lua`
   with `TRACE_FROM`/`TRACE_TO` (needs `-debug -debugger none`) against

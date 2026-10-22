@@ -8,13 +8,16 @@
  * $8000-$FFFF read $FF. Writes (each latch decodes A0-A2, mirrored over its
  * 2 KB): lamps and coin counter $6000-$6003, the sound's LFO $6004-$6007,
  * the sound $6800-$6807, NMI enable $7001, stars $7004, flip $7006/$7007,
- * the tone's pitch $7800.
+ * the tone's pitch $7800 (emu/sound.c makes the sound from these). The
+ * watchdog resets the board after 8 vertical blanks without a read of $7800.
  *
  * A frame is 264 lines of 192 CPU cycles (384 pixels at 6.144 MHz), from the
  * start of line 240 (vertical blank) to the next: the NMI flip-flop is set
- * there when enabled, and writing 0 to $7001 clears it. Lines 16-239 are
- * visible; each is drawn (gfx/galaxian.c) as the beam leaves it, from the
- * memory as it is then. Frame k starts at CPU cycle 50688 k - 1, as MAME's.
+ * there when enabled (MAME raises the NMI a cycle earlier), and writing 0 to
+ * $7001 clears it. Frame k starts at CPU cycle 50688 k. Lines 16-239 are
+ * visible; as MAME does, a line is drawn (gfx/galaxian.c) when a write to
+ * the video first comes after its start (or at the frame's end), so it
+ * shows the video as it was when the line began.
  */
 #ifndef GALAXIAN_BOARD_H
 #define GALAXIAN_BOARD_H
@@ -22,6 +25,7 @@
 #include <stdint.h>
 
 #include "assets/rom.h"
+#include "emu/sound.h"
 #include "emu/z80.h"
 #include "gfx/fb.h"
 #include "gfx/galaxian.h"
@@ -31,6 +35,8 @@
 #define BOARD_FRAME_CYCLES (BOARD_LINES * BOARD_CYCLES_PER_LINE) /* 50688 */
 #define BOARD_VBLANK_LINE 240                                  /* frames start here */
 #define BOARD_FRAME_HZ (3072000.0 / BOARD_FRAME_CYCLES)        /* 60.606 */
+#define BOARD_AUDIO_SAMPLES (BOARD_FRAME_CYCLES / SOUND_CYCLES_PER_SAMPLE) /* 792 a frame at 48 kHz */
+#define BOARD_WATCHDOG_FRAMES 8 /* vertical blanks without a read of $7800 reset the board */
 
 /* Inputs, active high, as MAME's ports */
 #define IN0_COIN1 0x01
@@ -63,6 +69,12 @@ struct Board {
     uint8_t latch7000[8];    /* NMI enable, stars, flip */
     uint8_t pitch;           /* $7800 */
     uint8_t in0, in1, in2;
+    int watchdog;            /* vertical blanks since $7800 was last read */
+    /* the sound; the last frame's samples are in audio */
+    Sound sound;
+    int16_t audio[BOARD_AUDIO_SAMPLES];
+    struct { int16_t sample; uint8_t latch, value; } sound_events[256];
+    int sound_event_count;
     int64_t frame;           /* frames run */
     int64_t frame_start;     /* the cycle the frame started (line 240) */
     int next_line;           /* the next line to draw, in frame order */
@@ -77,7 +89,8 @@ struct Board {
 
 /* Power on. */
 void board_init(Board *b, const RomSet *rom);
-/* Run one frame, drawing the visible lines into b->video.native. */
+/* Run one frame, drawing the visible lines into b->video.native and making
+   its BOARD_AUDIO_SAMPLES of sound in b->audio. */
 void board_run_frame(Board *b);
 /* A memory read as the CPU sees it (no side effects). */
 uint8_t board_peek(Board *b, uint16_t addr);

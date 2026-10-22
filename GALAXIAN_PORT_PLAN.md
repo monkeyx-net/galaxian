@@ -128,8 +128,53 @@ play; RAM, tile and object RAM, latches and every pixel at 14 frames):
 - Inputs a MAME probe sets in its frame callback reach the game at the
   start of the next frame.
 
-To confirm: the flip latches ($7006/$7007, the cocktail cabinet), the
-watchdog's timeout, the sound latches (E2).
+- The watchdog (probe): 8 vertical blanks without a read of $7800 reset
+  the board (the CPU and the latches; RAM keeps its contents).
+
+To confirm: the flip latches ($7006/$7007, the cocktail cabinet).
+
+### 2.1 Sound (E2, measured from MAME's output)
+
+Each source was recorded with `-wavwrite` while the CPU idled (the probe
+replaces the program with `LD A,($7800)` / `JR` to feed the watchdog) and a
+Lua script set one latch at a time; analysed with spectra, zero-crossing
+tracks and the jumps of the high-passed output. `emu/sound.c` models each
+from these measurements (generated: nothing from the ROM set). A sample at
+48 kHz is exactly 64 CPU cycles: 792 a frame.
+- The output passes a one-pole high-pass, 0.99792 a sample (10 ms); every
+  level below is in MAME's output units before it.
+- Tone ($7800, $6806 VOL1, $6807 VOL2): an 8-bit counter clocked at
+  1.536 MHz, loaded with the pitch on overflow, steps a 4-bit counter
+  (1.536 MHz / (256 - pitch): 750 Hz at 0 with the volume bits off,
+  $FF silent). A DAC sums q0, q1^q2 and (q1&q2)^q3 with weights by volume:
+  off 1900, 2849, 0; VOL1 1388, 6665, 0; VOL2 1526, 2288, 3356 (the third
+  input makes a 16-step period, an octave down); both 1177, 5651, 2591.
+  The level is the counter's at each sample (so $FC-$FF are silent and
+  $FD aliases to 16 kHz, as MAME's). The game plays the coin sound (pitch
+  $04 to $80, 4 a frame), the tunes and the aliens' sounds with it.
+- Swarm ($6800-$6802 FS1-FS3, the LFO $6004-$6007 = bits 0-3): three
+  555s, 237.5 -> 124, 332 -> 169.5, 483.5 -> 238.5 Hz, the frequency falling
+  linearly over one LFO period then jumping back. Their low half is fixed
+  (156, 109.5, 73.1 samples), the high half the rest. The LFO period by its
+  value 0-15: 0.164 0.173 0.184 0.194 0.212 0.226 0.245 0.264 0.324 0.359
+  0.407 0.463 0.573 0.687 0.886 1.194 s; it changes at once when the bits
+  do. Each square is 4560 peak to peak, through a 14.5-sample low-pass;
+  the volume bits load the mixer: x1, 0.827, 0.933, 0.714 (VOL1, VOL2,
+  both). A latch at 0 holds its square low. The game turns FS1-3 on at a
+  game's start and steps the LFO value down by one every 256 frames.
+- Hit ($6803): the noise generator steps at 8 kHz (every second line; a
+  17-bit shift register in the model). Its bit swings +-52000 through a
+  147-sample low-pass and a resonant high-pass (s^2 + s/2.3) / (s^2 +
+  s/2.4 + 1) at 152 Hz; full at once when set, fading with 0.71 s when
+  cleared. The game holds it about 39 frames (an explosion).
+- Fire ($6805): an oscillator whose edges come through a near
+  differentiator as clicks of 10250 decaying x0.3128 a sample; its rate is
+  jittered +-30% by the noise bit, rising from 2.5 kHz towards 4.6 kHz
+  (0.07 s) while set and back (0.1 s) after; the clicks fade with 0.19 s
+  when cleared. The game holds it 8 frames per shot.
+- $6804 makes no sound (the game writes it with the aliens' tone sounds).
+- Not modelled: MAME's thump at power-on as its filters charge (the
+  first half second).
 
 ## 3. Phases
 
@@ -137,7 +182,7 @@ watchdog's timeout, the sound latches (E2).
 |---|---|---|---|
 | P0 | `git init`, skeleton from Defender, loader for the galaxian set, test card, MAME pipeline, packaging, CI, `CLAUDE.md`, README | `enhance`, `rom_load`, `mame_rom_map` pass | done 2026-10-22 |
 | E1 | Z80, board, video, stars; the game plays via `--emulate` (silent at first) | `mame_emu`: Z80 cycle for cycle over 100 traced frames; RAM and pictures equal at ~12 frames (`mame_capture`) | done 2026-10-22 |
-| E2 | Discrete sound model | each sound latch audibly right, its timing as MAME's wav | |
+| E2 | Discrete sound model | each sound latch audibly right, its timing as MAME's wav | done 2026-10-22 |
 | X1 | Extractor | `extract` | |
 | C0-C3 | RE notes; the C game piece by piece, then the default | `sim`, `game`, `routines`, `frame`; the C game plays from power-on through game over | |
 | E3/E4 | Polish (cocktail flip, devices, web), high-score saving, release | device checklist; published | |
@@ -166,7 +211,10 @@ asking.
   MAME's instruction trace of frames 1600-1700 (`trace_probe.lua`): the
   Z80 cycle for cycle. At every captured frame RAM (bar the stack,
   $43C0-$43FF), tile and object RAM, the latches and the picture (MAME's
-  224x768) are MAME's.
+  224x768) are MAME's. The sound against MAME's recording of the run
+  (`game.wav`, from `mame_capture`): in 1/10 s windows where MAME is not
+  quiet, at least 90% within 3 dB of its level (today all of them); where
+  the tone plays alone, its pitch and level (1 dB) exact.
 - Later: `extract`, `sim`, `game`, `routines`, `frame` (as Defender's).
 - Probes that are not tests: `ram_probe.lua`-style dumps come from
   `capture_probe.lua` (`PROBE_FRAMES`, `PROBE_POKE`); `test_emu` takes

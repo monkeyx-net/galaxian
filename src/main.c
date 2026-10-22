@@ -3,8 +3,8 @@
  * The game is the ROM's own code on the emulated board (emu/board.c), a
  * board frame per tick (--emulate; the game in C will be the default, plan
  * section 3). The port supplies video (with the enhanced presets), input,
- * the DIP switches (galaxian.cfg in the save folder) and, later, sound and
- * high-score saving. --test-card shows the test card instead (ROM status, an
+ * sound (the board's model of the discrete circuit, emu/sound.c), the DIP
+ * switches (galaxian.cfg in the save folder) and, later, high-score saving. --test-card shows the test card instead (ROM status, an
  * input tester and the graphics presets).
  *
  *   galaxian [--windowed] [--gfx preset] [--rom path] [--test-card] [--emulate]
@@ -242,6 +242,8 @@ static void step(const InputFrame *in)
         board_inputs(in);
         board_run_frame(&g.board);
         galaxian_to_fb(&g.board.video, &fb);
+        /* a board frame's sound (1/60.606 s) plays in the tick's 1/60 s, as the game runs 1% slow */
+        audio_stream(g.board.audio, BOARD_AUDIO_SAMPLES, BOARD_AUDIO_SAMPLES * FRAME_HZ);
     }
     if (in->coin && !coin_was) g.coins++;
     coin_was = in->coin;

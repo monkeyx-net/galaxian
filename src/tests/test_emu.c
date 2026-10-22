@@ -10,10 +10,17 @@
  *     dir/frame_<n>.txt) and MAME's snapshot (capture dir/<n>.png): RAM bar
  *     the stack, tile and object RAM, the latches, and the picture pixel for
  *     pixel (MAME's 224x768).
+ *   - the sound, against MAME's recording of the run (capture dir/game.wav,
+ *     48 kHz): the sound model is checked loosely, as it is modelled from
+ *     MAME's output rather than taken from it (emu/sound.c). In 1/10 s
+ *     windows where MAME is not quiet, at least 90% have the board's level
+ *     within 3 dB; where the tone plays alone (its pitch and volume exact),
+ *     the level within 1 dB and the pitch the same.
  * MAME's frame callback, where the probes dump, runs at the start of
  * vertical blank, as the board's frames end. Inputs a MAME probe sets in its
  * frame callback reach the game at the start of the frame after next.
  */
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -178,6 +185,115 @@ static int compare_main(void)
     return matched > 1000 ? 0 : -1;
 }
 
+/* ---- sound -------------------------------------------------------------------- */
+
+static int16_t *ours_audio;
+static long ours_audio_len, ours_audio_cap;
+static uint8_t *tone_alone; /* a flag per frame: only the tone could be sounding */
+static int hit_or_fire_frames; /* frames since the hit or fire latch was last on */
+
+static void audio_add(const Board *b)
+{
+    if (ours_audio_len + BOARD_AUDIO_SAMPLES > ours_audio_cap) {
+        ours_audio_cap = ours_audio_cap ? ours_audio_cap * 2 : 1 << 20;
+        ours_audio = realloc(ours_audio, (size_t)ours_audio_cap * sizeof *ours_audio);
+        tone_alone = realloc(tone_alone, (size_t)(ours_audio_cap / BOARD_AUDIO_SAMPLES + 1));
+    }
+    memcpy(ours_audio + ours_audio_len, b->audio, sizeof b->audio);
+    const uint8_t *l = b->sound.latch;
+    hit_or_fire_frames = l[SOUND_HIT] || l[SOUND_FIRE] ? 0 : hit_or_fire_frames + 1;
+    /* the swarm off, the hit and fire long gone (their tails), the tone on */
+    tone_alone[ours_audio_len / BOARD_AUDIO_SAMPLES] =
+        !l[SOUND_FS1] && !l[SOUND_FS2] && !l[SOUND_FS3] && hit_or_fire_frames > 300 && l[SOUND_PITCH] < 0xF0;
+    ours_audio_len += BOARD_AUDIO_SAMPLES;
+}
+
+/* A mono 16-bit WAV's samples (the data chunk), or NULL. */
+static int16_t *load_wav(const char *path, long *n)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    uint8_t h[12];
+    if (fread(h, 1, 12, f) != 12 || memcmp(h, "RIFF", 4) || memcmp(h + 8, "WAVE", 4)) {
+        fclose(f);
+        return NULL;
+    }
+    int16_t *data = NULL;
+    for (;;) {
+        uint8_t c[8];
+        if (fread(c, 1, 8, f) != 8) break;
+        uint32_t len = (uint32_t)c[4] | (uint32_t)c[5] << 8 | (uint32_t)c[6] << 16 | (uint32_t)c[7] << 24;
+        if (!memcmp(c, "data", 4)) {
+            data = malloc(len ? len : 1);
+            *n = (long)(fread(data, 1, len, f) / 2);
+            for (long i = 0; i < *n; i++) { /* little-endian on any host */
+                const uint8_t *p = (const uint8_t *)(data + i);
+                data[i] = (int16_t)(p[0] | p[1] << 8);
+            }
+            break;
+        }
+        if (fseek(f, (long)len + (len & 1), SEEK_CUR)) break;
+    }
+    fclose(f);
+    return data;
+}
+
+static double rms(const int16_t *s, int n)
+{
+    double mean = 0, sum = 0;
+    for (int i = 0; i < n; i++) mean += s[i];
+    mean /= n;
+    for (int i = 0; i < n; i++) sum += (s[i] - mean) * (s[i] - mean);
+    return sqrt(sum / n);
+}
+
+/* The strongest frequency in a window (Hz): the period whose autocorrelation is highest. */
+static double pitch(const int16_t *s, int n)
+{
+    int best = 0;
+    double best_c = 0;
+    for (int lag = 8; lag < 400; lag++) { /* 120 Hz - 6 kHz */
+        double c = 0, e = 0;
+        for (int i = 0; i + lag < n; i++) c += (double)s[i] * s[i + lag], e += (double)s[i + lag] * s[i + lag];
+        if (e > 0 && c / e > best_c + 1e-9) best_c = c / e, best = lag;
+        if (best_c > 0.98) break;
+    }
+    return best ? (double)SOUND_RATE / best : 0;
+}
+
+static int compare_sound(const char *path)
+{
+    long n = 0;
+    int16_t *mame = load_wav(path, &n);
+    if (!mame) {
+        fprintf(stderr, "cannot read %s\n", path);
+        return -1;
+    }
+    const int w = SOUND_RATE / 10;
+    long loud = 0, close = 0, alone = 0, alone_ok = 0;
+    /* from 1 s on: MAME's output starts with a thump as its filters charge */
+    for (long a = SOUND_RATE; a + w <= n && a + w <= ours_audio_len; a += w) {
+        double rm = rms(mame + a, w), ro = rms(ours_audio + a, w);
+        if (rm < 300) continue;
+        loud++;
+        double db = 20 * log10((ro + 1) / (rm + 1));
+        if (fabs(db) <= 3) close++;
+        long f0 = a / BOARD_AUDIO_SAMPLES, f1 = (a + w) / BOARD_AUDIO_SAMPLES;
+        int is_alone = 1;
+        for (long f = f0; f <= f1; f++) is_alone &= tone_alone[f];
+        if (!is_alone) continue;
+        alone++;
+        double pm = pitch(mame + a, w), po = pitch(ours_audio + a, w);
+        if (fabs(db) <= 1 && fabs(pm - po) <= pm * 0.01) alone_ok++;
+        else fprintf(stderr, "  sound at %.1f s (the tone alone): %.0f Hz %.0f rms, MAME %.0f Hz %.0f rms\n",
+                     (double)a / SOUND_RATE, po, ro, pm, rm);
+    }
+    free(mame);
+    printf("sound: %ld of %ld windows within 3 dB of MAME's level; the tone alone in %ld of %ld at its pitch and level\n",
+           close, loud, alone_ok, alone);
+    return loud >= 100 && close * 10 >= loud * 9 && alone >= 10 && alone_ok == alone ? 0 : -1;
+}
+
 /* ---- captured frames ------------------------------------------------------- */
 
 static int hex(char c)
@@ -322,6 +438,7 @@ int main(int argc, char **argv)
     int failed = 0;
     while (board.frame < last) {
         board_run_frame(&board);
+        audio_add(&board);
         if (getenv("LATCH_LOG")) { /* the latches' changes, frame by frame */
             static uint8_t was[25];
             uint8_t now[25];
@@ -357,5 +474,7 @@ int main(int argc, char **argv)
         }
     }
     if (with_trace && compare_main()) failed = 1;
+    snprintf(path, sizeof path, "%s/game.wav", argv[3]);
+    if (compare_sound(path)) failed = 1;
     return failed;
 }

@@ -44,6 +44,7 @@ add_library(galaxian_core STATIC
   src/gfx/galaxian.c
   src/emu/z80.c
   src/emu/board.c
+  src/emu/sound.c
 )
 target_include_directories(galaxian_core PUBLIC src)
 target_link_libraries(galaxian_core PUBLIC m)

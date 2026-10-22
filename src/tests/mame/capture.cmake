@@ -4,7 +4,8 @@
 #     screen during their scan-out, so the end-of-frame dump and the
 #     snapshot hold the same picture)
 #   - mame_emu (emu.cmake) reuses the run: the emulated board against all of
-#     it, RAM and pictures, at every captured frame
+#     it, RAM and pictures at every captured frame, and the sound (MAME's
+#     recording of the run, game.wav)
 #   cmake -DMAME=... -DROMPATH=... -DWORKDIR=... -DROM=... -DPROBE=capture_probe.lua -DCHECK=test_capture -P capture.cmake
 foreach(v MAME ROMPATH WORKDIR ROM PROBE CHECK)
   if(NOT DEFINED ${v})
@@ -23,7 +24,8 @@ set(ENV{PROBE_FRAMES} "${frame_list}")
 list(GET capture_frames -1 last)
 set(ENV{PROBE_LAST} ${last})
 set(ENV{PROBE_SCRIPT} "${capture_script}")
-execute_process(COMMAND "${MAME}" ${mame_args} -seconds_to_run 300 -autoboot_script "${PROBE}"
+execute_process(COMMAND "${MAME}" ${mame_args} -seconds_to_run 300 -samplerate 48000 -wavwrite "${out}/game.wav"
+                  -autoboot_script "${PROBE}"
                 RESULT_VARIABLE rc OUTPUT_QUIET ERROR_QUIET)
 if(NOT rc EQUAL 0)
   message(FATAL_ERROR "MAME exited with ${rc}")
