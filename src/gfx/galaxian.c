@@ -1,5 +1,6 @@
 #include "gfx/galaxian.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #define STAR_PERIOD GALAXIAN_STAR_PERIOD
@@ -41,6 +42,45 @@ void galaxian_video_init(GalaxianVideo *v, const RomSet *rom)
         int bl = (p >> 6 & 1) * 69 + (p >> 7 & 1) * 148;
         v->palette[i] = (uint32_t)r << 16 | (uint32_t)g << 8 | (uint32_t)bl;
     }
+}
+
+int galaxian_video_load(GalaxianVideo *v, const char *dir)
+{
+    if (!stars_ready) make_stars();
+    memset(v, 0, sizeof *v);
+    char path[1200], line[256];
+    snprintf(path, sizeof path, "%s/gfx/tiles.txt", dir);
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    int tile = -1, row = 0, rows = 0;
+    while (fgets(line, sizeof line, f)) {
+        unsigned n;
+        if (line[0] == '#') continue;
+        if (sscanf(line, "tile %x", &n) == 1) {
+            tile = (int)n, row = 0;
+            continue;
+        }
+        if (tile < 0 || tile > 255 || row > 7 || strlen(line) < 8) continue;
+        for (int col = 0; col < 8; col++) {
+            int p = line[col] - '0';
+            v->planes[0][tile * 8 + row] |= (uint8_t)((p >> 1 & 1) << (7 - col));
+            v->planes[1][tile * 8 + row] |= (uint8_t)((p & 1) << (7 - col));
+        }
+        row++, rows++;
+    }
+    fclose(f);
+    snprintf(path, sizeof path, "%s/gfx/palette.txt", dir);
+    f = fopen(path, "r");
+    if (!f) return -1;
+    int colours = 0;
+    while (colours < 32 && fgets(line, sizeof line, f)) {
+        unsigned c;
+        if (line[0] != '#' && sscanf(line, "%x", &c) == 1) v->palette[colours++] = c & 0xFFFFFF;
+    }
+    fclose(f);
+    v->gfx[0] = v->planes[0];
+    v->gfx[1] = v->planes[1];
+    return rows == 256 * 8 && colours == 32 ? 0 : -1;
 }
 
 /* the 2-bit pixel of tile `code` at its line `row`, pixel `col` along it */

@@ -4,9 +4,16 @@ Galaxian (native SDL2 build)
 Converted by monkeyx.
 
 Run ./galaxian, or galaxian.exe on Windows (add --windowed for a window on a
-desktop). Work in progress: this version shows the test card (ROM status
-and an input tester); the game follows.
+desktop). Work in progress: today the game is your ROM's own code on an
+emulated Galaxian board (checked against MAME), with its sound modelled
+from the board's circuit; the port adds the graphics presets, pad controls
+and the DIP switches (galaxian.cfg in $GALAXIAN_SAVE_DIR, else
+$XDG_DATA_HOME/galaxian, %APPDATA%\galaxian on Windows, or
+~/.local/share/galaxian: coinage, bonus life, lives).
 ./galaxian --test-card shows the ROM status and an input tester.
+./galaxian --extract galaxian.zip writes the game's tiles, palette and font
+from your set into assets/ next to the program (the PortMaster launcher
+does this on the first run), for the game rewritten in C to come.
 
 ROM set
   The game needs your own MAME galaxian ROM set. Put galaxian.zip (or a

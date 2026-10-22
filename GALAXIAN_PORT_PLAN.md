@@ -176,6 +176,21 @@ from these measurements (generated: nothing from the ROM set). A sample at
 - Not modelled: MAME's thump at power-on as its filters charge (the
   first half second).
 
+### 2.2 Graphics in the ROM set (X1, `extract`)
+
+- The 256 tiles of 1h/1k hold the font at $00-$2B: the hex digits 0-F
+  ($00-$0F), a blank ($10), A-Z ($11-$2A; the game's text uses these) and a
+  dash ($2B); a second digit set at $90-$99 and the namco logo's pieces
+  after it; aliens, ships, flags and explosions as tiles and as 16x16
+  sprites (64, four tiles each).
+- `galaxian --extract` writes `gfx/tiles.txt` (the tiles as the board
+  reads them), `gfx/palette.txt` (the PROM through MAME's weights),
+  `gfx/font.txt` (the character codes), previews (tiles, sprites, three of
+  the attract mode's screens from the emulated board) and `manifest.txt`
+  last. `gfx/galaxian.c` reads the tiles and palette back
+  (`galaxian_video_load`) for the game in C. Tables follow as the C game
+  needs them (C phases), naming ROM addresses only.
+
 ## 3. Phases
 
 | Phase | Work | Exit | Status |
@@ -183,7 +198,7 @@ from these measurements (generated: nothing from the ROM set). A sample at
 | P0 | `git init`, skeleton from Defender, loader for the galaxian set, test card, MAME pipeline, packaging, CI, `CLAUDE.md`, README | `enhance`, `rom_load`, `mame_rom_map` pass | done 2026-10-22 |
 | E1 | Z80, board, video, stars; the game plays via `--emulate` (silent at first) | `mame_emu`: Z80 cycle for cycle over 100 traced frames; RAM and pictures equal at ~12 frames (`mame_capture`) | done 2026-10-22 |
 | E2 | Discrete sound model | each sound latch audibly right, its timing as MAME's wav | done 2026-10-22 |
-| X1 | Extractor | `extract` | |
+| X1 | Extractor | `extract` | done 2026-10-22 |
 | C0-C3 | RE notes; the C game piece by piece, then the default | `sim`, `game`, `routines`, `frame`; the C game plays from power-on through game over | |
 | E3/E4 | Polish (cocktail flip, devices, web), high-score saving, release | device checklist; published | |
 
@@ -215,7 +230,11 @@ asking.
   (`game.wav`, from `mame_capture`): in 1/10 s windows where MAME is not
   quiet, at least 90% within 3 dB of its level (today all of them); where
   the tone plays alone, its pitch and level (1 dB) exact.
-- Later: `extract`, `sim`, `game`, `routines`, `frame` (as Defender's).
+- `extract` - label `rom`: two extractions are byte-identical and hold
+  every file; the tiles and palette read back are the ROM set's; the font
+  matches the attract mode's "GALAXIANS" on the emulated board (each
+  letter's code and its pixels); no manifest without a ROM set
+- Later: `sim`, `game`, `routines`, `frame` (as Defender's).
 - Probes that are not tests: `ram_probe.lua`-style dumps come from
   `capture_probe.lua` (`PROBE_FRAMES`, `PROBE_POKE`); `test_emu` takes
   `DUMP_DIR` (its pictures), `OBJECT_LOG=frame` (object RAM line by line),

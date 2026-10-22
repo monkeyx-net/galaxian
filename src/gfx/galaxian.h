@@ -41,12 +41,16 @@ typedef struct {
     uint8_t objects[0x100];
     uint8_t stars_on, flip_x, flip_y;
     long star_origin;         /* the generator's step at line 0's first pixel */
-    const uint8_t *gfx[2];    /* 1h, 1k */
+    const uint8_t *gfx[2];    /* 1h, 1k: the ROM set's, or planes */
+    uint8_t planes[2][0x800]; /* the graphics read from the extracted assets */
     uint32_t palette[32];     /* 0xRRGGBB */
     uint32_t native[GALAXIAN_NATIVE_H][GALAXIAN_NATIVE_W];
 } GalaxianVideo;
 
 void galaxian_video_init(GalaxianVideo *v, const RomSet *rom);
+/* The same from the extracted assets (gfx/tiles.txt, gfx/palette.txt under
+   dir; assets/extract.h), for the game in C. Returns 0, or -1. */
+int galaxian_video_load(GalaxianVideo *v, const char *dir);
 /* Draw board line `line` (16-239) into native. */
 void galaxian_draw_line(GalaxianVideo *v, int line);
 /* The picture at the port's resolution (fb scale 1): each pixel from its

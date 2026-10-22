@@ -49,6 +49,7 @@ build/galaxian --windowed                         # play: the ROM on the emulate
 build/galaxian --windowed --test-card             # the test card (ROM status, input tester)
 build/galaxian --check-rom roms/galaxian.zip      # verify a ROM set
 build/galaxian --dump-rom roms/galaxian.zip 0000 27FF   # program ROM, graphics and PROM as hex lines
+build/galaxian --extract roms/galaxian.zip [dir]  # assets from the ROM set (dev builds: build/assets after each build)
 SDL_VIDEODRIVER=dummy build/galaxian --frames 60 --screenshot out.png   # headless screenshot
 cmake --build build --target package_linux package_portmaster   # release archives
 cmake -S . -B build-san -DGALAXIAN_SANITIZE=ON    # ASan/UBSan build
@@ -59,7 +60,7 @@ Release builds: `-DGALAXIAN_DEV_ASSETS=OFF` (no source-tree fallbacks).
 `--emulate` runs the ROM on the emulated board (today the only game; the C
 game will be the default). `--input script.txt` replays controls (lines of
 `<frame> [coin] [start] [start2] [left] [right] [fire]`). Later phases add
-`--extract` and the C game (see the plan's phase table).
+the C game (see the plan's phase table).
 
 ## Layout (`src/`)
 
@@ -81,7 +82,8 @@ game will be the default). `--input script.txt` replays controls (lines of
   224x256)
 - `assets/` - `rom.c` (the galaxian set from a zip or folder, matched by
   CRC), `zip.c`, `inflate.c`, `png.c`, `assets.c` (asset folder lookup),
-  `savefile.c` (the save folder)
+  `savefile.c` (the save folder), `extract.c` (tiles, palette, font,
+  previews; `manifest.txt` written last)
 - `emu/` - the emulated board: `z80.c` (the CPU, each memory access at
   its T-state), `board.c` (memory map, latches, the NMI at vertical blank,
   lines drawn lazily as MAME does, the starfield generator's restart, the
@@ -109,6 +111,9 @@ Every change keeps `ctest` green.
 - `enhance` - always runs (scalers, presets, glow)
 - `rom_load` - label `rom`: loads the set from the zip, from renamed copies
   in a folder (CRC matching), and fails cleanly on an empty folder
+- `extract` - label `rom`: two extractions are byte-identical; the tiles
+  and palette read back are the ROM's; the font matches the attract
+  mode's text on the emulated board; no manifest without a ROM set
 - `z80` - always runs: every opcode's T-states and machine cycles, known
   flag results, NMI, IM 1, HALT
 - `mame_rom_map` - label `mame`: MAME's view of the program ROM, graphics

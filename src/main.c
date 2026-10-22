@@ -11,6 +11,7 @@
  *            [--input script.txt] [--frames N] [--screenshot out.png]
  *   galaxian --check-rom <dir|zip>
  *   galaxian --dump-rom <dir|zip> <first> <last>
+ *   galaxian --extract <dir|zip> [<asset dir>]
  *
  * --frames N stops after N updates; with --screenshot the last frame is
  * written as a PNG (use SDL_VIDEODRIVER=dummy to run headless).
@@ -21,6 +22,10 @@
  * in the program ROM, then "G:ADDR BYTE" for the graphics ROMs (1h at
  * $000, 1k at $800) and "P:ADDR BYTE" for the palette PROM: the format the
  * MAME probe writes (src/tests/mame/rom_map_probe.lua).
+ * --extract writes the tiles, palette, font and previews from the ROM set to
+ * the asset folder (default $GALAXIAN_ASSETS, else assets/ next to the
+ * program; assets/extract.h). The game written in C will read only that
+ * folder; the emulated board runs from the ROM set.
  */
 #include <SDL.h>
 #include <stdio.h>
@@ -28,6 +33,7 @@
 #include <string.h>
 
 #include "assets/assets.h"
+#include "assets/extract.h"
 #include "assets/png.h"
 #include "assets/rom.h"
 #include "assets/savefile.h"
@@ -288,6 +294,30 @@ static int dump_rom(const char *path, const char *first, const char *last)
     return 0;
 }
 
+static int extract(const char *argv0, const char *rom_path, const char *out_dir)
+{
+    static RomSet rom;
+    char err[512], dir[1024];
+    if (out_dir) snprintf(dir, sizeof dir, "%s", out_dir);
+    else if (getenv("GALAXIAN_ASSETS")) snprintf(dir, sizeof dir, "%s", getenv("GALAXIAN_ASSETS"));
+    else {
+        snprintf(dir, sizeof dir, "%s", argv0);
+        char *slash = strrchr(dir, '/');
+#ifdef _WIN32
+        char *bslash = strrchr(dir, '\\');
+        if (bslash > slash) slash = bslash;
+#endif
+        if (slash) snprintf(slash, sizeof dir - (size_t)(slash - dir), "/assets");
+        else snprintf(dir, sizeof dir, "assets");
+    }
+    if (rom_load(&rom, rom_path, err, sizeof err) || extract_all(&rom, dir, err, sizeof err)) {
+        fprintf(stderr, "galaxian: %s\n", err);
+        return 1;
+    }
+    printf("galaxian: assets extracted to %s\n", dir);
+    return 0;
+}
+
 static int save_screenshot(const char *path)
 {
     static uint8_t rgba[FB_HEIGHT * FB_MAX_SCALE * FB_WIDTH * FB_MAX_SCALE * 4];
@@ -409,6 +439,7 @@ int main(int argc, char **argv)
     const char *rom_arg = NULL;
     if (argc == 3 && !strcmp(argv[1], "--check-rom")) return check_rom(argv[2]);
     if (argc == 5 && !strcmp(argv[1], "--dump-rom")) return dump_rom(argv[2], argv[3], argv[4]);
+    if ((argc == 3 || argc == 4) && !strcmp(argv[1], "--extract")) return extract(argv[0], argv[2], argc == 4 ? argv[3] : NULL);
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--windowed")) windowed = true;
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) max_frames = strtol(argv[++i], NULL, 10);
@@ -429,8 +460,9 @@ int main(int argc, char **argv)
                     "usage: %s [--windowed] [--gfx preset] [--rom path] [--test-card] [--emulate]\n"
                     "          [--input script.txt] [--frames N] [--screenshot out.png]\n"
                     "       %s --check-rom <dir|zip>\n"
-                    "       %s --dump-rom <dir|zip> <first> <last>\n",
-                    argv[0], argv[0], argv[0]);
+                    "       %s --dump-rom <dir|zip> <first> <last>\n"
+                    "       %s --extract <dir|zip> [<asset dir>]\n",
+                    argv[0], argv[0], argv[0], argv[0]);
             return 2;
         }
     }
@@ -443,7 +475,7 @@ int main(int argc, char **argv)
     else rom_locate(argv[0], g.rom_path, sizeof g.rom_path);
     if (g.rom_path[0] && rom_load(&g.rom, g.rom_path, g.rom_error, sizeof g.rom_error))
         fprintf(stderr, "galaxian: %s\n", g.rom_error);
-    if (assets_find(argv[0], "manifest.txt", g.assets_path, sizeof g.assets_path)) g.assets_path[0] = '\0';
+    if (assets_find(argv[0], EXTRACT_MANIFEST, g.assets_path, sizeof g.assets_path)) g.assets_path[0] = '\0';
     if (!g.rom.loaded) g.test_card = 1; /* nothing to run: show why */
     if (!g.test_card) {
         settings_load();
