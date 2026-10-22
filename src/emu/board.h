@@ -78,6 +78,7 @@ struct Board {
     int64_t frame;           /* frames run */
     int64_t frame_start;     /* the cycle the frame started (line 240) */
     int next_line;           /* the next line to draw, in frame order */
+    int no_video;            /* tests: skip drawing the lines (the state is the same) */
     /* optional: called on every CPU write (tests trace RAM through this) */
     void (*write_hook)(Board *b, uint16_t addr, uint8_t value);
     /* optional: called at the start of each line (scripted input timing) */

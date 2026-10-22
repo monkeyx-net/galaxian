@@ -38,7 +38,7 @@ static void draw_lines_until(Board *b, int64_t cycle)
 {
     while (b->next_line < BOARD_LINES && b->frame_start + (int64_t)b->next_line * BOARD_CYCLES_PER_LINE <= cycle) {
         int line = (BOARD_VBLANK_LINE + b->next_line) % BOARD_LINES;
-        if (line >= GALAXIAN_FIRST_LINE && line <= GALAXIAN_LAST_LINE) galaxian_draw_line(&b->video, line);
+        if (line >= GALAXIAN_FIRST_LINE && line <= GALAXIAN_LAST_LINE && !b->no_video) galaxian_draw_line(&b->video, line);
         b->next_line++;
         if (b->line_hook && b->next_line < BOARD_LINES)
             b->line_hook(b, (BOARD_VBLANK_LINE + b->next_line) % BOARD_LINES);

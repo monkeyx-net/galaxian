@@ -46,6 +46,11 @@ add_library(galaxian_core STATIC
   src/emu/z80.c
   src/emu/board.c
   src/emu/sound.c
+  src/sim/game.c
+  src/sim/util.c
+  src/sim/swarm.c
+  src/sim/shots.c
+  src/sim/aliens.c
 )
 target_include_directories(galaxian_core PUBLIC src)
 target_link_libraries(galaxian_core PUBLIC m)
@@ -131,7 +136,10 @@ if(EXISTS "${GALAXIAN_ROM}")
   add_executable(test_extract src/tests/test_extract.c)
   target_link_libraries(test_extract PRIVATE galaxian_core)
   add_test(NAME extract COMMAND test_extract "${GALAXIAN_ROM}" "${CMAKE_BINARY_DIR}/extract_test")
-  set_tests_properties(rom_load extract PROPERTIES LABELS rom)
+  add_executable(test_sim src/tests/test_sim.c)
+  target_link_libraries(test_sim PRIVATE galaxian_core)
+  add_test(NAME sim COMMAND test_sim "${GALAXIAN_ROM}")
+  set_tests_properties(rom_load extract sim PROPERTIES LABELS rom)
   # Development builds extract the assets next to the program after each build.
   if(NOT CMAKE_CROSSCOMPILING)
     add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/assets/manifest.txt"

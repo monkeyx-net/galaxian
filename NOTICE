@@ -4,12 +4,6 @@ Copyright 2026 monkeyx-net
 The source code of this project is licensed under the Apache License,
 Version 2.0 (see LICENSE).
 
-Parts of the source (platform layer, asset loaders, framebuffer, blitter,
-pixel-art scalers and enhanced graphics) come from the Robotron: 2084
-native SDL2 port, Copyright 2025-2026 Steven Hatch, under the same license,
-by way of the Joust and Defender native SDL2 ports (Copyright 2026
-monkeyx-net).
-
 THIRD-PARTY MATERIAL NOT COVERED BY THAT LICENSE
 
 Galaxian (1979) was created and published by Namco (and licensed to
