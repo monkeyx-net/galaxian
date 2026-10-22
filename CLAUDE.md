@@ -84,8 +84,8 @@ emulated board. `--input script.txt` replays controls (lines of
   (graphics presets, HD image registry, whole-frame filter, glow),
   `debugfont.c` (3x5 font for diagnostics, not the ROM's), `galaxian.c`
   (a board line: tiles with per-column scroll and colour, sprites,
-  shells, stars, the PROM palette; kept at MAME's 224x768 and reduced to
-  224x256)
+  shells, stars, the PROM palette; composed at 256 pixels into the
+  port's 224x256, and MAME's 224x768 only for the tests)
 - `assets/` - `rom.c` (the galaxian set from a zip or folder, matched by
   CRC), `zip.c`, `inflate.c`, `png.c`, `assets.c` (asset folder lookup),
   `savefile.c` (the save folder), `extract.c` (tiles, palette, font,
@@ -128,7 +128,8 @@ Every change keeps `ctest` green.
   in a folder (CRC matching), and fails cleanly on an empty folder
 - `extract` - label `rom`: two extractions are byte-identical; the tiles,
   palette and tables read back are the ROM's; the font matches the
-  attract mode's text on the emulated board; no manifest without a ROM set
+  attract mode's text on the emulated board; the 224x256 picture is the
+  224x768 one reduced; no manifest without a ROM set
 - `sim` - label `rom`: every ported routine checked at every call the ROM
   makes in two scripted runs (one with an autopilot), against a model
   loaded from the board (see the plan)

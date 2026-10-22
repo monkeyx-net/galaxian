@@ -259,6 +259,28 @@ the game runs in the NMI; the main loop draws.
   program ROM's tables it reads (ranges listed in `extract.c`: texts,
   scores, colours, tunes, the dives' arcs, timers, the demo's weights).
 
+### 2.4 CPU use (2026-10-22)
+
+Profiled (gprof, 6000 headless frames, desktop) the C game cost ~0.62
+ms/frame, 82% of it drawing lines, 11% the sound, 7% reducing the picture;
+the game logic is next to nothing. Each line wrote a column of the 224x768
+`native` picture (688 KB, 768 strided stores) and `galaxian_to_fb` read all
+of it again, which a handheld's 256 KB L2 makes worse. Now:
+- A line is composed at 256 pixels (tiles, sprites and shells are three of
+  MAME's pixels alike; the flip of a pixel's three is pixel 255 - h's), a
+  tile's row fetched once per 8 pixels; the stars stay at two a pixel. It
+  writes the port's pixel to `screen` (224x256); `native` only when the
+  tests want it (`no_native`, set by the game). `extract` checks `screen`
+  is `native` reduced at every frame.
+- The tone's counter is stepped 32 ticks at once by arithmetic (the same
+  integers: checked exhaustively).
+- The loop draws and presents only when a frame ran, and otherwise sleeps
+  until the next is due (not in the browser): no spinning where vsync does
+  not block, no redraws on 120/144 Hz displays.
+Result: line drawing ~0.51 -> ~0.25 ms/frame (gprof); 3000 headless frames
+1.88 -> 0.81 s user (C), 2.20 -> 1.06 s (`--emulate`); windowed with vsync
+about 13% -> 10% of a desktop core. Pictures and sound unchanged.
+
 ## 3. Phases
 
 | Phase | Work | Exit | Status |
@@ -304,7 +326,8 @@ asking.
 - `extract` - label `rom`: two extractions are byte-identical and hold
   every file; the tiles and palette read back are the ROM set's; the font
   matches the attract mode's "GALAXIANS" on the emulated board (each
-  letter's code and its pixels); no manifest without a ROM set
+  letter's code and its pixels); the port's picture (`screen`) is MAME's
+  (`native`) reduced at every frame of it; no manifest without a ROM set
 - `sim` - label `rom`: two scripted runs on the board (the attract mode,
   coins, one- and two-player games; then an autopilot that hunts the
   aliens and dodges the shells, its ships topped up to reach later waves).

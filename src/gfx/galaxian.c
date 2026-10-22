@@ -103,19 +103,22 @@ void galaxian_draw_line(GalaxianVideo *v, int line)
     /* the tiles and sprites of the line as the flip has it (line 255 - L,
        the pixels along it the other way round); the first three sprites
        show a line late in that count, the first three shells a line late
-       on the beam; no sprite is drawn before pixel SPRITE_FIRST in the count */
-    uint32_t tiles[256 * 3], sprites[256 * 3], shells[256 * 3];
-    memset(tiles, 0, sizeof tiles);
-    memset(sprites, 0, sizeof sprites);
-    memset(shells, 0, sizeof shells);
+       on the beam; no sprite is drawn before pixel SPRITE_FIRST in the count.
+       Each is three of MAME's pixels alike, so they are composed a pixel at
+       a time (the flip of a pixel's three is pixel 255 - h's) */
+    uint32_t game[256], sprites[256], shells[256];
     int vl = v->flip_y ? 255 - line : line;
-    for (int h = 0; h < 256; h++) {
-        int col = h >> 3;
+    for (int col = 0; col < 32; col++) {
         int ls = (vl + v->objects[col * 2]) & 0xFF;
-        int code = v->tiles[(ls >> 3) * 32 + col];
-        int p = tile_pixel(v, code, ls, h);
-        if (p) tiles[h * 3] = tiles[h * 3 + 1] = tiles[h * 3 + 2] = v->palette[(v->objects[col * 2 + 1] & 7) * 4 + p];
+        int a = v->tiles[(ls >> 3) * 32 + col] * 8 + (ls & 7);
+        unsigned lo = v->gfx[1][a], hi = v->gfx[0][a]; /* 1h is the high bit */
+        const uint32_t *pal = v->palette + (v->objects[col * 2 + 1] & 7) * 4;
+        for (int x = 0; x < 8; x++) {
+            int bit = 7 - x, p = (lo >> bit & 1) | (hi >> bit & 1) << 1;
+            game[col * 8 + x] = p ? pal[p] : 0;
+        }
     }
+    memset(sprites, 0, sizeof sprites);
     for (int i = 7; i >= 0; i--) {
         const uint8_t *s = v->objects + 0x40 + i * 4;
         int row = (vl - (0xF0 - s[0]) - (i < 3)) & 0xFF;
@@ -127,11 +130,19 @@ void galaxian_draw_line(GalaxianVideo *v, int line)
             if (h >= 256) break;
             if (h < SPRITE_FIRST) continue; /* no sprite before this pixel (in the flip's count) */
             int p = sprite_pixel(v, code, row, s[1] & 0x40 ? 15 - k : k);
-            if (p) sprites[h * 3] = sprites[h * 3 + 1] = sprites[h * 3 + 2] = v->palette[(s[2] & 7) * 4 + p];
+            if (p) sprites[h] = v->palette[(s[2] & 7) * 4 + p];
         }
     }
+    for (int h = 0; h < 256; h++)
+        if (sprites[h]) game[h] = sprites[h];
+    if (v->flip_x)
+        for (int h = 0; h < 128; h++) {
+            uint32_t t = game[h];
+            game[h] = game[255 - h], game[255 - h] = t;
+        }
     /* shells, and the missile (the last): the flip moves their lines but
        not their pixels along a line (the game mirrors those itself) */
+    memset(shells, 0, sizeof shells);
     for (int i = 0; i < 8; i++) {
         const uint8_t *s = v->objects + 0x60 + i * 4;
         int at = 255 - s[1];
@@ -140,39 +151,42 @@ void galaxian_draw_line(GalaxianVideo *v, int line)
         uint32_t c = i == 7 ? 0xFFFF00 : 0xFFFFFF;
         for (int k = 0; k < 4; k++) {
             int h = 251 - s[3] + k;
-            if (h >= 0 && h < 256) shells[h * 3] = shells[h * 3 + 1] = shells[h * 3 + 2] = c;
+            if (h >= 0 && h < 256) shells[h] = c;
         }
     }
-    /* the stars, never flipped, where the rest is black */
-    uint32_t px[256 * 3];
-    memset(px, 0, sizeof px);
+    for (int h = 0; h < 256; h++)
+        if (shells[h]) game[h] = shells[h];
+    /* the stars, never flipped, where the rest is black: two a pixel, the
+       first on its first third, the second on the other two */
+    uint32_t star_even[256], star_odd[256];
     if (v->stars_on) {
         long at = (v->star_origin + (long)line * STAR_STEPS_PER_LINE) % STAR_PERIOD;
         for (int s = 0; s < 512; s++) {
             uint8_t st = stars[at];
             if (++at == STAR_PERIOD) at = 0;
-            if (!(st & 0x80) || !((line ^ (s >> 4)) & 1)) continue;
-            uint32_t c = star_colour(st & 0x3F);
-            if (s & 1) px[(s >> 1) * 3 + 1] = px[(s >> 1) * 3 + 2] = c;
-            else px[(s >> 1) * 3] = c;
+            uint32_t c = (st & 0x80) && ((line ^ (s >> 4)) & 1) ? star_colour(st & 0x3F) : 0;
+            if (s & 1) star_odd[s >> 1] = c;
+            else star_even[s >> 1] = c;
         }
     }
-    for (int y = 0; y < 256 * 3; y++) {
-        int from = v->flip_x ? 256 * 3 - 1 - y : y;
-        uint32_t c = tiles[from];
-        if (sprites[from]) c = sprites[from];
-        if (shells[y]) c = shells[y];
-        if (c) px[y] = c;
-    }
+    /* the port's pixel takes the middle third, or the first, or the last */
     int x = GALAXIAN_LAST_LINE - line;
-    for (int y = 0; y < GALAXIAN_NATIVE_H; y++) v->native[y][x] = px[y];
+    for (int h = 0; h < 256; h++) {
+        uint32_t c = game[h], even = 0, odd = 0;
+        if (!c && v->stars_on) even = star_even[h], odd = star_odd[h];
+        v->screen[h][x] = c ? c : odd ? odd : even;
+        if (!v->no_native) {
+            v->native[h * 3][x] = c ? c : even;
+            v->native[h * 3 + 1][x] = v->native[h * 3 + 2][x] = c ? c : odd;
+        }
+    }
 }
 
 void galaxian_to_fb(const GalaxianVideo *v, Framebuffer *fb)
 {
     for (int y = 0; y < FB_HEIGHT; y++) {
         uint32_t *row = fb_row(fb, y);
-        const uint32_t *a = v->native[y * 3], *b = v->native[y * 3 + 1], *c = v->native[y * 3 + 2];
-        for (int x = 0; x < FB_WIDTH; x++) row[x] = 0xFF000000u | (b[x] ? b[x] : a[x] ? a[x] : c[x]);
+        const uint32_t *s = v->screen[y];
+        for (int x = 0; x < FB_WIDTH; x++) row[x] = 0xFF000000u | s[x];
     }
 }

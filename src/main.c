@@ -341,6 +341,7 @@ static int c_assets(const char *argv0)
 static int c_start(const char *argv0)
 {
     if (c_assets(argv0) || galaxian_video_load(&cv, g.assets_path)) return -1;
+    cv.no_native = 1; /* MAME's picture is for the tests */
     cg.data = cg_data;
     sound_reset(&csound);
     for (int i = 0; i < SOUND_LATCHES; i++) sound_write(&csound, i, 0);
@@ -713,7 +714,9 @@ static Uint64 step_ticks, last, acc;
 static long frames;
 static int rc;
 
-/* Step for the time elapsed, then draw and present; false = stop. */
+/* Step for the time elapsed, then draw and present; with no step due, wait
+   for the next (vsync may not block, or the display may run faster than 60
+   Hz). false = stop. */
 static bool run_once(void)
 {
     Uint64 now = SDL_GetPerformanceCounter();
@@ -724,6 +727,7 @@ static bool run_once(void)
     /* Headless runs step once per loop so the frame count is exact. */
     if (max_frames >= 0 && acc < step_ticks) acc = step_ticks;
 
+    long stepped = frames;
     while (acc >= step_ticks) {
         InputFrame in;
         input_poll(&in);
@@ -735,6 +739,13 @@ static bool run_once(void)
         frames++;
         acc -= step_ticks;
         if (max_frames >= 0 && frames >= max_frames) break;
+    }
+    if (frames == stepped) {
+#ifndef __EMSCRIPTEN__
+        Uint64 ms = (step_ticks - acc) * 1000 / SDL_GetPerformanceFrequency();
+        SDL_Delay(ms > 1 ? (Uint32)ms : 1);
+#endif
+        return true; /* the last picture stays */
     }
     if (max_frames < 0 || frames >= max_frames) draw(video_display_scale());
     if (max_frames < 0) video_present(shown, g.gfx.scanlines); /* blocks on vsync */
@@ -802,7 +813,10 @@ int main(int argc, char **argv)
     if (!g.c_game && !g.rom.loaded) g.test_card = 1; /* nothing to run: show why */
     if (!g.test_card) {
         settings_load();
-        if (!g.c_game) board_init(&g.board, &g.rom);
+        if (!g.c_game) {
+            board_init(&g.board, &g.rom);
+            g.board.video.no_native = 1;
+        }
     }
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0) {

@@ -73,13 +73,15 @@ void sound_render(Sound *s, int16_t *out, int n)
     const uint8_t *l = s->latch;
     for (int i = 0; i < n; i++) {
         /* tone: 32 ticks of 1.536 MHz a sample, the level where the counter is */
-        for (int t = 0; t < 32; t++) {
-            if (s->tone_count == 0xFF) {
-                s->tone_count = l[SOUND_PITCH];
-                s->tone_step = (s->tone_step + 1) & 15;
-            } else {
-                s->tone_count++;
-            }
+        /* (counting up to $FF, then a step and the pitch loaded, each a tick) */
+        int ticks = 32, to_ff = 0xFF - s->tone_count;
+        if (ticks <= to_ff) {
+            s->tone_count = (uint8_t)(s->tone_count + ticks);
+        } else {
+            int period = 0x100 - l[SOUND_PITCH];
+            ticks -= to_ff; /* the first of these loads the pitch */
+            s->tone_step = (s->tone_step + 1 + (ticks - 1) / period) & 15;
+            s->tone_count = (uint8_t)(l[SOUND_PITCH] + (ticks - 1) % period);
         }
         int q = s->tone_step, q0 = q & 1, q1 = q >> 1 & 1, q2 = q >> 2 & 1, q3 = q >> 3 & 1;
         const double *w = tone_weight[l[SOUND_VOL1] | l[SOUND_VOL2] << 1];

@@ -5,8 +5,9 @@
  * palette read back from them (gfx/galaxian.c) are the ROM set's, and the
  * tables (the ROM's bytes in their ranges, nothing else); the font
  * matches what the attract mode draws on the emulated board ("WE ARE THE
- * GALAXIANS": each letter's tile code and its pixels on screen); and with
- * no ROM set nothing is written, not even a manifest.
+ * GALAXIANS": each letter's tile code and its pixels on screen), the
+ * port's picture (`screen`) being MAME's (`native`) reduced, every frame;
+ * and with no ROM set nothing is written, not even a manifest.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -71,6 +72,20 @@ static int font_code(const char *dir, char ch)
     return code;
 }
 
+/* The board's `screen`: each pixel the middle of its three in `native`, or
+   the first, or the last (a star on any of them shows). Returns the
+   pixels that differ. */
+static int screen_differs(const GalaxianVideo *v)
+{
+    int bad = 0;
+    for (int y = 0; y < FB_HEIGHT; y++)
+        for (int x = 0; x < FB_WIDTH; x++) {
+            uint32_t a = v->native[y * 3][x], b = v->native[y * 3 + 1][x], c = v->native[y * 3 + 2][x];
+            if (v->screen[y][x] != (b ? b : a ? a : c)) bad++;
+        }
+    return bad;
+}
+
 /* The attract mode's "WE ARE THE GALAXIANS", found in tile RAM down a column,
    each letter as the font says, drawn on screen as its glyph. */
 static void check_font(const char *dir)
@@ -82,9 +97,10 @@ static void check_font(const char *dir)
         CHECK(codes[k] >= 0, "font.txt has no '%c'", text[k]);
     }
     board_init(&board, &rom);
-    int col = -1, row = -1;
+    int col = -1, row = -1, frames_bad = 0;
     while (board.frame < 3000 && col < 0) {
         board_run_frame(&board);
+        if (screen_differs(&board.video)) frames_bad++;
         for (int c = 0; c < 32 && col < 0; c++)
             for (int r = 8; r < 32 && col < 0; r++) {
                 int k = 0;
@@ -92,6 +108,7 @@ static void check_font(const char *dir)
                 if (!text[k]) col = c, row = r;
             }
     }
+    CHECK(!frames_bad, "the screen is not the native picture reduced in %d of %ld frames", frames_bad, board.frame);
     CHECK(col >= 0, "the attract mode never showed \"%s\"", text);
     if (col < 0) return;
     board_run_frame(&board); /* the next frame shows it whole */

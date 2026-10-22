@@ -7,8 +7,10 @@
  * column 239 - L, and the 256 pixels along it run down the screen. The
  * picture is kept as MAME shows it, at three times the board's pixel clock
  * along a line (`native`, 224 x 768 in screen orientation; the starfield's
- * generator runs at twice the pixel clock), and reduced to the port's
- * 224x256 framebuffer by galaxian_to_fb.
+ * generator runs at twice the pixel clock), and as the port shows it
+ * (`screen`, 224x256: each pixel from its three, a star on any of them
+ * showing), copied to the framebuffer by galaxian_to_fb. Only the tests
+ * against MAME need `native`: `no_native` skips it.
  *
  *   tiles     32x32 tiles of 8x8 (graphics ROMs 1h, 1k: two bitplanes, a
  *             byte per line, bit 7 first along it); tile RAM row r holds
@@ -47,17 +49,18 @@ typedef struct {
     const uint8_t *gfx[2];    /* 1h, 1k: the ROM set's, or planes */
     uint8_t planes[2][0x800]; /* the graphics read from the extracted assets */
     uint32_t palette[32];     /* 0xRRGGBB */
+    int no_native;            /* draw only `screen` */
     uint32_t native[GALAXIAN_NATIVE_H][GALAXIAN_NATIVE_W];
+    uint32_t screen[FB_HEIGHT][FB_WIDTH];
 } GalaxianVideo;
 
 void galaxian_video_init(GalaxianVideo *v, const RomSet *rom);
 /* The same from the extracted assets (gfx/tiles.txt, gfx/palette.txt under
    dir; assets/extract.h), for the game in C. Returns 0, or -1. */
 int galaxian_video_load(GalaxianVideo *v, const char *dir);
-/* Draw board line `line` (16-239) into native. */
+/* Draw board line `line` (16-239) into screen (and native). */
 void galaxian_draw_line(GalaxianVideo *v, int line);
-/* The picture at the port's resolution (fb scale 1): each pixel from its
-   three along the line (a star on any of them shows). */
+/* The picture at the port's resolution (fb scale 1): `screen`. */
 void galaxian_to_fb(const GalaxianVideo *v, Framebuffer *fb);
 
 #endif
