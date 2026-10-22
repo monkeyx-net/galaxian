@@ -60,6 +60,7 @@ set(ENV{PROBE_FIELDS} "Cabinet=32")
 execute_process(COMMAND "${MAME}" ${mame_args} -seconds_to_run 300 -autoboot_script "${PROBE}"
                 RESULT_VARIABLE rc OUTPUT_QUIET ERROR_QUIET)
 unset(ENV{PROBE_FIELDS})
+file(REMOVE_RECURSE "${WORKDIR}/cfg") # MAME saved the Cabinet switch there
 if(NOT rc EQUAL 0)
   message(FATAL_ERROR "MAME exited with ${rc} (the cocktail run)")
 endif()
