@@ -110,3 +110,76 @@ void shots_hit_ship(Game *g)
     if (!(RD(0x4200) & 1)) return;
     for (int i = 0; i < 14; i++) hit_ship(g, (uint16_t)(SHELLS + i * 5));
 }
+
+void shots_kill_flying(Game *g, uint16_t ix)
+{
+    WR(ix, 0);
+    WR(ix + 1, 1);
+    WR(ix + 2, 0);
+    uint8_t e = 4, a = RD(ix + 7);
+    for (int b = 3; b > 0; b--) { /* the score by row: 4 the blue rows, 5 purple, 6 red */
+        if (a < 0x50) {
+            util_queue(g, 3, e);
+            return;
+        }
+        e++;
+        a = (uint8_t)(a - 0x10);
+    }
+    game_wr16(g, 0x422B, 0xF001);
+    a = RD(0x422A);
+    if (a == 2 && !(RD(ix + 0x20) & 1) && !(RD(ix + 0x40) & 1)) a = 3; /* both escorts shot first */
+    WR(0x422D, a);
+    util_queue(g, 3, (uint8_t)(a + e));
+}
+
+void shots_hit_flying(Game *g)
+{
+    if (!(RD(0x4208) & 1)) return;
+    for (uint16_t ix = 0x42D0; ix < 0x42D0 + 7 * 0x20; ix += 0x20) {
+        if (!(RD(ix) & 1)) continue;
+        if ((uint8_t)(RD(ix + 3) - RD(0x4209) + 2) >= 6) continue;
+        if ((uint8_t)(RD(ix + 4) - RD(0x420A) + 5) >= 0x0C) continue;
+        WR(0x420B, 1);
+        shots_kill_flying(g, ix);
+    }
+}
+
+void shots_crash(Game *g)
+{
+    if (!(RD(0x4200) & 1)) return;
+    for (uint16_t ix = 0x42D0; ix < 0x42D0 + 7 * 0x20; ix += 0x20) {
+        if (!(RD(ix) & 1)) continue;
+        uint8_t a = (uint8_t)(RD(ix + 3) + 0x21);
+        if (a >= 5) {
+            if ((uint8_t)(a - 5) >= 0x0C) continue;
+            if ((uint8_t)(RD(0x4202) - RD(ix + 4) + 0x0A) >= 0x15) continue;
+        } else if ((uint8_t)(RD(0x4202) - RD(ix + 4) + 7) >= 0x0F) {
+            continue;
+        }
+        WR(0x4204, 1);
+        shots_kill_flying(g, ix);
+    }
+}
+
+void shots_missile(Game *g)
+{
+    if (RD(0x4208) & 1) {
+        uint8_t y = (uint8_t)(RD(0x4209) - 4);
+        WR(0x4209, y);
+        if ((uint8_t)(y - 0x0E) < 4) WR(0x420B, 1);
+    } else {
+        WR(0x4209, 0xDC);
+        WR(0x420A, RD(0x4200) & 1 ? RD(0x4202) : 0);
+    }
+    uint8_t y = RD(0x4209), x = RD(0x420A);
+    if (RD(0x4018) & 1) WR(0x409F, y - 1);
+    else WR(0x409F, (uint8_t)~y + 0xFC);
+    WR(0x409D, (uint8_t)~x);
+}
+
+void shots_missile_done(Game *g)
+{
+    if (!(RD(0x420B) & 1)) return;
+    WR(0x420B, 0);
+    WR(0x4208, 0);
+}

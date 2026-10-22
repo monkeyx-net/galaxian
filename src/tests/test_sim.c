@@ -19,8 +19,15 @@
 #include "assets/rom.h"
 #include "emu/board.h"
 #include "sim/aliens.h"
+#include "sim/attack.h"
+#include "sim/coins.h"
+#include "sim/demo.h"
 #include "sim/game.h"
+#include "sim/player.h"
+#include "sim/screen.h"
 #include "sim/shots.h"
+#include "sim/sounds.h"
+#include "sim/text.h"
 #include "sim/swarm.h"
 #include "sim/util.h"
 
@@ -64,6 +71,48 @@ static void a_curve(Game *g, Regs *r) { aliens_curve(g, r->ix); }
 static void a_aim(Game *g, Regs *r) { aliens_aim(g, r->ix); }
 static void a_shoot(Game *g, Regs *r) { aliens_shoot(g, r->ix); }
 
+static void a_hit_flying(Game *g, Regs *r) { shots_hit_flying(g); }
+static void a_crash(Game *g, Regs *r) { shots_crash(g); }
+static void a_kill_flying(Game *g, Regs *r) { shots_kill_flying(g, r->ix); }
+static void a_player_hit(Game *g, Regs *r) { player_hit(g); }
+static void a_player_explode(Game *g, Regs *r) { player_explode(g); }
+static void a_lone(Game *g, Regs *r) { attack_lone(g); }
+static void a_side(Game *g, Regs *r) { attack_side(g); }
+static void a_flagship(Game *g, Regs *r) { attack_flagship(g); }
+static void a_rise(Game *g, Regs *r) { attack_rise(g); }
+static void a_lone_timers(Game *g, Regs *r) { attack_lone_timers(g); }
+static void a_flagship_timer(Game *g, Regs *r) { attack_flagship_timer(g); }
+static void a_flagship_go(Game *g, Regs *r) { attack_flagship_go(g); }
+static void a_shot_places(Game *g, Regs *r) { attack_shot_places(g); }
+static void a_wave_over(Game *g, Regs *r) { attack_wave_over(g); }
+static void a_next_wave(Game *g, Regs *r) { attack_next_wave(g); }
+static void a_flagship_wait(Game *g, Regs *r) { attack_flagship_wait(g); }
+static void a_6804(Game *g, Regs *r) { sounds_6804(g); }
+static void a_swarm_sound(Game *g, Regs *r) { sounds_swarm(g); }
+
+static void a_sounds(Game *g, Regs *r) { sounds_frame(g); }
+static void a_lfo(Game *g, Regs *r) { sounds_lfo(g); }
+static void a_coins_in(Game *g, Regs *r) { coins_in(g); }
+static void a_coins_credit(Game *g, Regs *r) { coins_credit(g); }
+static void a_lockout(Game *g, Regs *r) { coins_lockout(g); }
+static void a_type(Game *g, Regs *r) { text_type(g); }
+static void a_pilot(Game *g, Regs *r) { demo_pilot(g); }
+
+static void a_player_move(Game *g, Regs *r) { player_move(g); }
+static void a_missile(Game *g, Regs *r) { shots_missile(g); }
+static void a_missile_done(Game *g, Regs *r) { shots_missile_done(g); }
+
+static void a_cmd0(Game *g, Regs *r) { screen_command(g, 0, r->a); }
+static void a_cmd1(Game *g, Regs *r) { screen_command(g, 1, r->a); }
+static void a_cmd2(Game *g, Regs *r) { screen_command(g, 2, r->a); }
+static void a_cmd3(Game *g, Regs *r) { screen_command(g, 3, r->a); }
+static void a_cmd4(Game *g, Regs *r) { screen_command(g, 4, r->a); }
+static void a_cmd5(Game *g, Regs *r) { screen_command(g, 5, r->a); }
+static void a_cmd6(Game *g, Regs *r) { screen_command(g, 6, r->a); }
+static void a_cmd7(Game *g, Regs *r) { screen_command(g, 7, r->a); }
+static void a_idle(Game *g, Regs *r) { screen_idle(g); }
+static void a_ships(Game *g, Regs *r) { screen_ships(g, r->b); }
+
 static Routine routines[] = {
     { 0x003C, "random", a_random, OUT_A | OUT_B, 0, 0, 0, 0 },
     { 0x0048, "divide", a_divide, OUT_A | OUT_B | OUT_C | OUT_D, 0, 0, 0, 0 },
@@ -76,6 +125,9 @@ static Routine routines[] = {
     { 0x0363, "swarm scroll home", a_scroll_home, 0, 0, 0, 0, 0 },
     { 0x090D, "swarm sway", a_sway, 0, 0, 0, 0, 0 },
     { 0x098E, "swarm survey", a_survey, 0, 0, 0, 0, 0 },
+    { 0x0837, "ship moves", a_player_move, 0, 0, 0, 0, 0 },
+    { 0x0898, "missile", a_missile, 0, 0, 0, 0, 0 },
+    { 0x08E5, "missile done", a_missile_done, 0, 0, 0, 0, 0 },
     { 0x0A32, "fire", a_fire, 0, 0, 0, 0, 0 },
     { 0x0A74, "move shells", a_move_shells, 0, 0, 0, 0, 0 },
     { 0x0B0B, "missile hits swarm", a_hit_swarm, 0, 0, 0, 0, 0 },
@@ -86,6 +138,41 @@ static Routine routines[] = {
     { 0x116B, "alien curve", a_curve, 0, 0, 0, 0, 0 },
     { 0x11B0, "alien aim", a_aim, 0, 0, 0, 0, 0 },
     { 0x11E0, "alien shoots", a_shoot, 0, 0, 0, 0, 0 },
+    { 0x1227, "missile hits flying", a_hit_flying, 0, 0, 0, 0, 0 },
+    { 0x129E, "flying hits ship", a_crash, 0, 0, 0, 0, 0 },
+    { 0x125E, "flying alien killed", a_kill_flying, 0, 0, 0, 0, 0 },
+    { 0x12ED, "ship hit", a_player_hit, 0, 0, 0, 0, 0 },
+    { 0x1327, "ship explodes", a_player_explode, 0, 0, 0, 0, 0 },
+    { 0x1344, "lone attack", a_lone, 0, 0, 0, 0, 0 },
+    { 0x13E1, "attack side", a_side, 0, 0, 0, 0, 0 },
+    { 0x140C, "flagship attack", a_flagship, 0, 0, 0, 0, 0 },
+    { 0x14F3, "aggression", a_rise, 0, 0, 0, 0, 0 },
+    { 0x1515, "lone timers", a_lone_timers, 0, 0, 0, 0, 0 },
+    { 0x1555, "flagship timer", a_flagship_timer, 0, 0, 0, 0, 0 },
+    { 0x15C3, "flagship go", a_flagship_go, 0, 0, 0, 0, 0 },
+    { 0x15F4, "shot places", a_shot_places, 0, 0, 0, 0, 0 },
+    { 0x1621, "wave over", a_wave_over, 0, 0, 0, 0, 0 },
+    { 0x1637, "next wave", a_next_wave, 0, 0, 0, 0, 0 },
+    { 0x1688, "flagship wait", a_flagship_wait, 0, 0, 0, 0, 0 },
+    { 0x16A6, "sound 6804", a_6804, 0, 0, 0, 0, 0 },
+    { 0x16B8, "swarm sound", a_swarm_sound, 0, 0, 0, 0, 0 },
+    { 0x16F5, "sounds", a_sounds, 0, 0, 0, 0, 0 },
+    { 0x1898, "LFO", a_lfo, 0, 0, 0, 0, 0 },
+    { 0x18C0, "typewriter", a_type, 0, 0, 0, 0, 0 },
+    { 0x18EF, "coins in", a_coins_in, 0, 0, 0, 0, 0 },
+    { 0x1931, "credits", a_coins_credit, 0, 0, 0, 0, 0 },
+    { 0x197C, "coin lockout", a_lockout, 0, 0, 0, 0, 0 },
+    { 0x198E, "demo pilot", a_pilot, 0, 0, 0, 0, 0 },
+    { 0x2055, "draw alien", a_cmd0, 0, 0, 0, 0, 0 },
+    { 0x205E, "erase alien", a_cmd1, 0, 0, 0, 0, 0 },
+    { 0x2067, "swarm beats", a_idle, 0, 0, 0, 0, 0 },
+    { 0x215F, "ship frame", a_cmd2, 0, 0, 0, 0, 0 },
+    { 0x21A6, "add score", a_cmd3, 0, 0, 0, 0, 0 },
+    { 0x21FE, "clear score", a_cmd4, 0, 0, 0, 0, 0 },
+    { 0x2231, "draw score", a_cmd5, 0, 0, 0, 0, 0 },
+    { 0x22B3, "ships left", a_ships, 0, 0, 0, 0, 0 },
+    { 0x22F1, "text", a_cmd6, 0, 0, 0, 0, 0 },
+    { 0x24B7, "flags, credits", a_cmd7, 0, 0, 0, 0, 0 },
 };
 #define ROUTINES ((int)(sizeof routines / sizeof routines[0]))
 
@@ -94,8 +181,45 @@ static Routine routines[] = {
 static RomSet rom;
 static Board board;
 
-/* The scripted controls, by frame: the attract mode first, then cycles of
-   coins and a start (one player, then two), playing with every control. */
+/* The scripted runs: the controls by frame (the attract mode first, then
+   cycles of coins and a start, one player then two, playing with every
+   control), or an autopilot that hunts the aliens and dodges the shells,
+   with its ships topped up ($421D) until near the end, to reach the later
+   waves. */
+static int autopilot;
+static long top_up_until;
+static int npending;
+static void interrupt_pending(void);
+
+static void pilot(Board *b)
+{
+    const uint8_t *ram = b->ram;
+    int x = ram[0x202], target = -1, best_y = -1;
+    for (int s = 0; s < 8; s++) { /* the lowest diving alien */
+        const uint8_t *slot = ram + 0x2B0 + s * 0x20;
+        if ((slot[0] & 1) && slot[3] > best_y && slot[3] < 0xD0) best_y = slot[3], target = slot[4];
+    }
+    if (target < 0) /* else a column of the swarm */
+        for (int c = 0; c < 10 && target < 0; c++) {
+            int col = (int)((b->frame / 600 + c) % 10);
+            for (int r = 0; r < 6; r++)
+                if (ram[0x123 + r * 16 + col] & 1) target = ((col + 3) << 4) + 7 + ram[0x20E];
+        }
+    int dodge = 0;
+    for (int i = 0; i < 14; i++) { /* a shell close above */
+        const uint8_t *sh = ram + 0x260 + i * 5;
+        if ((sh[0] & 1) && sh[1] > 0x98 && sh[1] < 0xE0 && abs(sh[3] - x) < 14) dodge = sh[3] >= x ? -1 : 1;
+    }
+    int dir = dodge ? dodge : target < 0 ? 0 : (target & 0xFF) > x + 2 ? 1 : (target & 0xFF) < x - 2 ? -1 : 0;
+    if (dir > 0) b->in0 |= IN0_LEFT; /* left adds to x */
+    if (dir < 0) b->in0 |= IN0_RIGHT;
+    if (b->frame & 1) b->in0 |= IN0_FIRE;
+    if (b->frame < top_up_until && ram[0x21D] < 3) {
+        b->ram[0x21D] = 3;
+        interrupt_pending(); /* changed under the calls in flight */
+    }
+}
+
 static void controls(Board *b, int line)
 {
     if (line != BOARD_VBLANK_LINE) return;
@@ -104,6 +228,10 @@ static void controls(Board *b, int line)
     if (f < 3000) return;
     if ((p >= 300 && p < 310) || (p >= 330 && p < 340) || (p >= 360 && p < 370)) b->in0 |= IN0_COIN1;
     if (p >= 400 && p < 410) b->in1 |= (f / 20000) & 1 ? IN1_START2 : IN1_START1;
+    if (autopilot) {
+        pilot(b);
+        return;
+    }
     int m = (int)((f / 23) % 5);
     if (m == 1) b->in0 |= IN0_LEFT;
     if (m == 3) b->in0 |= IN0_RIGHT;
@@ -141,7 +269,11 @@ typedef struct {
 } Pending;
 
 static Pending pending[32];
-static int npending;
+
+static void interrupt_pending(void)
+{
+    for (int i = 0; i < npending; i++) pending[i].interrupted = 1;
+}
 static uint16_t prev_pc, prev_sp;
 static long shown;
 
@@ -190,11 +322,12 @@ static int compare(Pending *p)
     return bad;
 }
 
+static uint8_t executed[0x2800]; /* COVER=file: the instructions run, for reading the ROM */
+
 static void step(Board *b)
 {
     Z80 *c = &b->cpu;
-    if (c->nmi_pending)
-        for (int i = 0; i < npending; i++) pending[i].interrupted = 1;
+    if (c->pc < sizeof executed) executed[c->pc] = 1;
     /* returns: every call whose caller is back */
     while (npending && c->pc == pending[npending - 1].ret && c->sp == (uint16_t)(pending[npending - 1].sp + 2)) {
         Pending *p = &pending[--npending];
@@ -207,7 +340,7 @@ static void step(Board *b)
         if (c->pc != rt->addr) continue;
         uint8_t op = board_peek(b, prev_pc);
         int called = c->sp == (uint16_t)(prev_sp - 2);
-        int jumped = c->sp == prev_sp && (op == 0xC3 || (op & 0xC7) == 0xC2 || op == 0x18 || (op & 0xE7) == 0x20) &&
+        int jumped = c->sp == prev_sp && (op == 0xC3 || (op & 0xC7) == 0xC2 || op == 0x18 || (op & 0xE7) == 0x20 || op == 0xE9) &&
                      (prev_pc < rt->addr || prev_pc >= rt->addr + 0x80);
         if (!called && !jumped) continue;
         if (npending == (int)(sizeof pending / sizeof pending[0])) break;
@@ -219,6 +352,9 @@ static void step(Board *b)
         load_model(&p->model, b);
         cpu_regs(c, &p->regs);
     }
+    /* an NMI taken now breaks into every call in flight (a call just made included) */
+    if (c->nmi_pending)
+        for (int i = 0; i < npending; i++) pending[i].interrupted = 1;
     prev_pc = c->pc;
     prev_sp = c->sp;
 }
@@ -234,12 +370,20 @@ int main(int argc, char **argv)
         fprintf(stderr, "%s\n", err);
         return 1;
     }
-    board_init(&board, &rom);
-    board.no_video = 1;
-    board.line_hook = controls;
-    board.step_hook = step;
-    long frames = argc > 2 ? atol(argv[2]) : FRAMES;
-    while (board.frame < frames) board_run_frame(&board);
+    for (autopilot = 0; autopilot < 2; autopilot++) {
+        board_init(&board, &rom);
+        board.no_video = 1;
+        board.line_hook = controls;
+        board.step_hook = step;
+        npending = 0;
+        top_up_until = autopilot ? FRAMES - 8000 : 0;
+        while (board.frame < FRAMES) board_run_frame(&board);
+    }
+    if (getenv("COVER")) {
+        FILE *f = fopen(getenv("COVER"), "w");
+        for (unsigned a = 0; f && a < sizeof executed; a++) fprintf(f, "%04X %c\n", a, executed[a] ? 'X' : '.');
+        if (f) fclose(f);
+    }
     int failed = 0;
     for (int i = 0; i < ROUTINES; i++) {
         Routine *rt = &routines[i];

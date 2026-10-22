@@ -51,6 +51,13 @@ add_library(galaxian_core STATIC
   src/sim/swarm.c
   src/sim/shots.c
   src/sim/aliens.c
+  src/sim/player.c
+  src/sim/attack.c
+  src/sim/sounds.c
+  src/sim/coins.c
+  src/sim/text.c
+  src/sim/demo.c
+  src/sim/screen.c
 )
 target_include_directories(galaxian_core PUBLIC src)
 target_link_libraries(galaxian_core PUBLIC m)
