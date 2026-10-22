@@ -343,3 +343,9 @@ asking.
 - `platform/video.c` here fits pictures that integer scaling would leave
   small (sharp bilinear through a target texture); Defender's 292x240 at
   640x480 is integer 2x already, so it does not need it.
+- The MAME probes split a script's inputs with `%a+`, so `start2` became
+  `start` (a one-player start); here `%w+`. Defender's `capture_probe.lua`
+  and `trace_probe.lua` have the same pattern (its scripts use `start` only
+  so far).
+- A `routines`-style check from random states took minutes to write here
+  and found nothing, but covers the paths scripted play misses.
