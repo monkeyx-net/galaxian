@@ -3,13 +3,18 @@
 ---
 ## Changelog
 
-### Unreleased
+### v0.2.1 (2026-10-22)
 
 #### Port
 
 - **Operator menu** — F2 (Select+R1 on a pad) opens the DIP switches over
   the game, which waits: coinage, bonus ship, lives and cabinet, saved to
   `galaxian.cfg` when it closes.
+- **Lower CPU use** — lines drawn at the port's 256 pixels (MAME's 768
+  only for the tests), the tone's counter stepped by arithmetic, and the
+  loop sleeps until the next frame instead of redrawing (no spinning where
+  vsync does not block, no extra frames on 120/144 Hz displays). Pictures
+  and sound unchanged.
 
 ### v0.2.0 (2026-10-22)
 
