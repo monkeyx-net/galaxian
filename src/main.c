@@ -1,15 +1,22 @@
 /*
  * Galaxian native build: SDL setup and the fixed 60 Hz loop. See GALAXIAN_PORT_PLAN.md.
- * Phase P0: the test card (ROM status, an input tester and the graphics
- * presets); the emulated board and the game in C follow (plan section 3).
+ * The game is the ROM's own code on the emulated board (emu/board.c), a
+ * board frame per tick (--emulate; the game in C will be the default, plan
+ * section 3). The port supplies video (with the enhanced presets), input,
+ * the DIP switches (galaxian.cfg in the save folder) and, later, sound and
+ * high-score saving. --test-card shows the test card instead (ROM status, an
+ * input tester and the graphics presets).
  *
- *   galaxian [--windowed] [--gfx preset] [--rom path] [--test-card]
- *            [--frames N] [--screenshot out.png]
+ *   galaxian [--windowed] [--gfx preset] [--rom path] [--test-card] [--emulate]
+ *            [--input script.txt] [--frames N] [--screenshot out.png]
  *   galaxian --check-rom <dir|zip>
  *   galaxian --dump-rom <dir|zip> <first> <last>
  *
  * --frames N stops after N updates; with --screenshot the last frame is
  * written as a PNG (use SDL_VIDEODRIVER=dummy to run headless).
+ * --input replays scripted controls: lines of "<frame> [coin] [start]
+ * [start2] [left] [right] [fire]", each holding from that frame until the
+ * next line (live controls still quit).
  * --dump-rom prints "ADDR BYTE" lines (hex) for Z80 addresses first..last
  * in the program ROM, then "G:ADDR BYTE" for the graphics ROMs (1h at
  * $000, 1k at $800) and "P:ADDR BYTE" for the palette PROM: the format the
@@ -23,10 +30,13 @@
 #include "assets/assets.h"
 #include "assets/png.h"
 #include "assets/rom.h"
+#include "assets/savefile.h"
+#include "emu/board.h"
 #include "gfx/blit.h"
 #include "gfx/debugfont.h"
 #include "gfx/enhance.h"
 #include "gfx/fb.h"
+#include "gfx/galaxian.h"
 #include "platform/audio.h"
 #include "platform/input.h"
 #include "platform/video.h"
@@ -39,6 +49,7 @@
 /* Cap catch-up after a stall (suspend/resume, SD card hiccup). */
 #define MAX_STEPS_PER_PRESENT 4
 #define GFX_NOTICE_FRAMES 120
+#define SETTINGS_FILE "galaxian.cfg"
 
 #define WHITE 0xFFFFFFu
 #define GREY 0x606060u
@@ -62,6 +73,10 @@ typedef struct {
     char rom_error[256];
     char assets_path[1024]; /* the extracted assets, or "" */
     RomSet rom;
+    int test_card;       /* --test-card, or no ROM: the card instead of the game */
+    Board board;
+    uint8_t dips;        /* IN2, and IN1's coinage bits */
+    uint8_t coinage;
 } Port;
 
 static Port g;
@@ -140,6 +155,53 @@ static void draw_scene(Framebuffer *t)
     centred(t, 232, "CONVERTED BY MONKEYX", GREY);
 }
 
+/* ---- the game ---------------------------------------------------------------- */
+
+/* The DIP switches, as MAME's defaults unless galaxian.cfg says otherwise:
+   lines "coinage 1c1c|2c1c|1c2c|free", "bonus 7000|10000|12000|20000",
+   "lives 2|3". The file is written with the defaults if missing. */
+static void settings_load(void)
+{
+    g.dips = IN2_DEFAULT;
+    g.coinage = 0x00;
+    FILE *f = fopen(save_path(SETTINGS_FILE), "r");
+    if (!f) {
+        static const char defaults[] = "# Galaxian's DIP switches (MAME's defaults)\n"
+                                       "coinage 1c1c\n# 1c1c 2c1c 1c2c free\n"
+                                       "bonus 7000\n# 7000 10000 12000 20000\n"
+                                       "lives 3\n# 2 3\n";
+        save_store(SETTINGS_FILE, defaults, sizeof defaults - 1);
+        return;
+    }
+    char line[128], key[32], value[32];
+    while (fgets(line, sizeof line, f)) {
+        if (line[0] == '#' || sscanf(line, "%31s %31s", key, value) != 2) continue;
+        if (!strcmp(key, "coinage")) {
+            static const char *const names[4] = { "1c1c", "2c1c", "1c2c", "free" };
+            for (int i = 0; i < 4; i++)
+                if (!strcmp(value, names[i])) g.coinage = (uint8_t)(i << 6);
+        } else if (!strcmp(key, "bonus")) {
+            static const char *const names[4] = { "7000", "10000", "12000", "20000" };
+            for (int i = 0; i < 4; i++)
+                if (!strcmp(value, names[i])) g.dips = (uint8_t)((g.dips & ~IN2_BONUS) | i);
+        } else if (!strcmp(key, "lives")) {
+            if (!strcmp(value, "2")) g.dips &= (uint8_t)~IN2_LIVES3;
+            else if (!strcmp(value, "3")) g.dips |= IN2_LIVES3;
+        }
+    }
+    fclose(f);
+}
+
+/* The port's controls as the cabinet's switches: one panel, as the upright
+   cabinet (both players use player 1's controls). */
+static void board_inputs(const InputFrame *in)
+{
+    g.board.in0 = (uint8_t)((in->coin ? IN0_COIN1 : 0) | (in->move_x < 0 ? IN0_LEFT : 0) |
+                            (in->move_x > 0 ? IN0_RIGHT : 0) | (in->fire ? IN0_FIRE : 0));
+    g.board.in1 = (uint8_t)((in->start ? IN1_START1 : 0) | (in->start2 ? IN1_START2 : 0) | g.coinage);
+    g.board.in2 = g.dips;
+}
+
 /* Classic: the arcade frame. HD: drawn at the render scale. FILTER: the arcade
    frame upscaled whole. Glow goes over whichever is shown. */
 static void draw(int display_scale)
@@ -148,6 +210,18 @@ static void draw(int display_scale)
     const Scaler scaler = gs->smooth ? SCALER_SMOOTH : SCALER_CRISP;
     const int s = gfx_render_scale(gs, display_scale);
     shown = &fb;
+    if (!g.test_card) { /* the board's picture, already in fb; only pixels, so HD upscales it like FILTER */
+        if (g.gfx_notice > 0) {
+            char text[80];
+            snprintf(text, sizeof text, "GRAPHICS: %s", gfx_describe(&g.gfx));
+            fill_rectf(&fb, 0, FB_HEIGHT - 9, FB_WIDTH, 9, 0x000000);
+            centred(&fb, FB_HEIGHT - 7, text, YELLOW);
+        }
+        if (gs->mode != GFX_CLASSIC && !fb_init(&fb_big, s) && !enhance_filter_frame(&fb, &fb_big, scaler))
+            shown = &fb_big;
+        if (gs->glow) enhance_glow(shown);
+        return;
+    }
     if (gs->mode == GFX_HD && !fb_init(&fb_big, s) && !enhance_prepare(s, scaler)) {
         draw_scene(&fb_big);
         shown = &fb_big;
@@ -164,6 +238,11 @@ static void step(const InputFrame *in)
     static bool coin_was;
     g.clock++;
     g.in = *in;
+    if (!g.test_card) {
+        board_inputs(in);
+        board_run_frame(&g.board);
+        galaxian_to_fb(&g.board.video, &fb);
+    }
     if (in->coin && !coin_was) g.coins++;
     coin_was = in->coin;
     if (in->gfx_next || in->gfx_glow || in->gfx_scanlines) {
@@ -227,6 +306,56 @@ static int save_screenshot(const char *path)
     return 0;
 }
 
+/* ---- scripted input ------------------------------------------------------- */
+
+typedef struct {
+    long frame;
+    InputFrame in;
+} ScriptLine;
+
+static ScriptLine script[4096];
+static int script_len, script_pos;
+
+static int load_script(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        fprintf(stderr, "galaxian: cannot open %s\n", path);
+        return -1;
+    }
+    char line[256];
+    while (script_len < (int)(sizeof script / sizeof script[0]) && fgets(line, sizeof line, f)) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+        ScriptLine *l = &script[script_len];
+        memset(l, 0, sizeof *l);
+        char *tok = strtok(line, " \t\n");
+        if (!tok) continue;
+        l->frame = strtol(tok, NULL, 10);
+        while ((tok = strtok(NULL, " \t\n"))) {
+            if (!strcmp(tok, "coin")) l->in.coin = true;
+            else if (!strcmp(tok, "start")) l->in.start = true;
+            else if (!strcmp(tok, "start2")) l->in.start2 = true;
+            else if (!strcmp(tok, "left")) l->in.move_x = -1;
+            else if (!strcmp(tok, "right")) l->in.move_x = 1;
+            else if (!strcmp(tok, "fire")) l->in.fire = true;
+            else fprintf(stderr, "galaxian: %s: unknown token '%s'\n", path, tok);
+        }
+        script_len++;
+    }
+    fclose(f);
+    return 0;
+}
+
+/* Replace live controls with the script line in force at `frame` (quit stays live). */
+static void apply_script(InputFrame *in, long frame)
+{
+    while (script_pos + 1 < script_len && script[script_pos + 1].frame <= frame) script_pos++;
+    bool quit = in->quit;
+    if (script[script_pos].frame <= frame) *in = script[script_pos].in;
+    else memset(in, 0, sizeof *in);
+    in->quit = quit;
+}
+
 /* ---- loop ----------------------------------------------------------------- */
 
 /* Loop state, static so the browser can run one pass per animation frame. */
@@ -253,6 +382,7 @@ static bool run_once(void)
 #ifndef __EMSCRIPTEN__
         if (in.quit) return false; /* a browser tab has nothing to quit to */
 #endif
+        if (script_len) apply_script(&in, frames + 1);
         step(&in);
         frames++;
         acc -= step_ticks;
@@ -282,7 +412,11 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) max_frames = strtol(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) screenshot = argv[++i];
         else if (!strcmp(argv[i], "--rom") && i + 1 < argc) rom_arg = argv[++i];
-        else if (!strcmp(argv[i], "--test-card")) {} /* the only screen so far */
+        else if (!strcmp(argv[i], "--test-card")) g.test_card = 1;
+        else if (!strcmp(argv[i], "--emulate")) {} /* the only game so far */
+        else if (!strcmp(argv[i], "--input") && i + 1 < argc) {
+            if (load_script(argv[++i])) return 2;
+        }
         else if (!strcmp(argv[i], "--gfx") && i + 1 < argc) {
             if (gfx_parse(argv[++i], &g.gfx)) {
                 fprintf(stderr, "galaxian: unknown --gfx preset '%s' (one of: %s)\n", argv[i], gfx_preset_names());
@@ -290,8 +424,8 @@ int main(int argc, char **argv)
             }
         } else {
             fprintf(stderr,
-                    "usage: %s [--windowed] [--gfx preset] [--rom path] [--test-card]\n"
-                    "          [--frames N] [--screenshot out.png]\n"
+                    "usage: %s [--windowed] [--gfx preset] [--rom path] [--test-card] [--emulate]\n"
+                    "          [--input script.txt] [--frames N] [--screenshot out.png]\n"
                     "       %s --check-rom <dir|zip>\n"
                     "       %s --dump-rom <dir|zip> <first> <last>\n",
                     argv[0], argv[0], argv[0]);
@@ -308,6 +442,11 @@ int main(int argc, char **argv)
     if (g.rom_path[0] && rom_load(&g.rom, g.rom_path, g.rom_error, sizeof g.rom_error))
         fprintf(stderr, "galaxian: %s\n", g.rom_error);
     if (assets_find(argv[0], "manifest.txt", g.assets_path, sizeof g.assets_path)) g.assets_path[0] = '\0';
+    if (!g.rom.loaded) g.test_card = 1; /* nothing to run: show why */
+    if (!g.test_card) {
+        settings_load();
+        board_init(&g.board, &g.rom);
+    }
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0) {
         SDL_Log("SDL_Init: %s", SDL_GetError());

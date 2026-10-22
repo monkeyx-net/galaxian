@@ -75,23 +75,68 @@ Confirmed so far (MAME 0.289's view, by probe):
     10000, 02 12000, 03 20000), lives 04 (set: 3, the default; clear: 2),
     unused 08.
 
-To confirm by probe (E1), each recorded here as it is:
-- RAM $4000-$43FF (mirrored to $47FF), tile RAM $5000-$53FF (mirrored to
-  $57FF), object RAM $5800-$58FF (per-row scroll and colour $5800-$583F,
-  8 sprites $5840-$585F, shells and missile $5860-$587F); open-bus reads.
-- Writes: lamps and coin counter $6000-$6003, sound $6004-$6007 (LFO) and
-  $6800-$6807 (FS1-3, hit, fire, volume), NMI enable $7001, stars $7004,
-  flip $7006/$7007, pitch $7800; watchdog read $7800. NMI at vblank.
-- Tiles, sprites (16x16, the first three a line lower), shells (white) and
-  missile (yellow), the starfield (LFSR, scrolling), the palette's
-  resistor weights.
+Confirmed in E1 (`mame_emu`: the Z80 cycle for cycle over 100 frames of
+play; RAM, tile and object RAM, latches and every pixel at 14 frames):
+- Memory map (probe): $0000-$3FFF ROM ($2800-$3FFF read 0), RAM
+  $4000-$43FF mirrored once to $47FF, $4800-$4FFF reads $FF, tile RAM
+  $5000-$53FF mirrored to $57FF, object RAM $5800-$58FF mirrored to $5FFF,
+  IN0 / IN1 / IN2 at $6000 / $6800 / $7000 (each over 2 KB), $7800 reads
+  $FF (the watchdog), $8000-$FFFF reads $FF. Latches decode A0-A2 over
+  their 2 KB and keep bit 0.
+- The Z80 at power-on (MAME's): AF $0040, IX = IY = $FFFF, the others 0,
+  SP 0 (the game sets SP to $4400 itself; its stack never goes below
+  $43DA).
+- Frames: 264 lines of 192 cycles (50688), line 240 (vertical blank)
+  starting at cycle 50688 k. The NMI flip-flop is set there if $7001 bit 0
+  is set (writing 0 clears it); MAME raises the NMI a cycle before the
+  line starts: an instruction ending at or after cycle 50688 k - 1 is
+  followed by it (11 cycles: PC pushed at T 5 and 8). The handler is at
+  $0066 (it pushes AF BC DE HL IX IY, then writes 0 to $7001).
+- Writes take effect at their machine cycle's start (LD (nn),A at T 10).
+  MAME draws a line lazily: a write to the tile or object RAM or a video
+  latch first draws every line that has started, so a line shows the video
+  as it was when the line began. The game rewrites sprites during the
+  frame (the player's ship), so this matters.
+- Tiles: tile RAM row r is board lines 8r-8r+7 (screen column 239 - line),
+  column c pixels 8c-8c+7 along the line (down the screen). Object RAM 2c
+  scrolls column c along the line ((line + scroll) & 255 picks the tile
+  row), 2c+1 is its colour (bits 0-2). A tile is 8 bytes in each of 1h
+  (the pixel's high bit) and 1k (its low bit), a byte per line, bit 7 the
+  first pixel along it. Pixel 0 is transparent (the stars show).
+- Sprites ($5840-$585F, 4 bytes: y, code bits 0-5 with flip-x 40 and
+  flip-y 80, colour, x): 16x16, the four tiles 4 code to 4 code + 3 (+1
+  the next 8 pixels along the line, +2 the next 8 lines). Sprite i covers
+  lines 240 - y to 255 - y, one line later for sprites 0-2, pixels x + 1
+  to x + 16. The port draws sprite 0 over the others and shells over
+  sprites (not yet seen overlapping in a capture).
+- Shells ($5860-$587F, 4 bytes, bytes 1 and 3 used): entry i is drawn on
+  line 255 - byte 1 (one line later for entries 0-2), 4 pixels from 251 -
+  byte 3; entries 0-6 white ($FFFFFF), 7 (the missile) yellow ($FFFF00).
+- Palette (6l): red bits 0-2 and green bits 3-5 weigh 29, 62, 133; blue
+  bits 6-7 weigh 69, 148 (MAME's values). Colour c of a tile or sprite
+  uses entries 4c-4c+3.
+- Stars: a 17-bit shift register (sr >> 1 | ((sr >> 12) ^ ~sr) & 1 <<
+  16, from 0), two steps a board pixel, 512 a line. A step is a star when
+  (sr & $1FE01) == $1FE00, colour (~sr >> 3) & $3F: red bits 5-4, green
+  3-2, blue 1-0, each 0, $D6, $C2, $FF. The first step of a pixel is MAME's
+  first third of it, the second its other two. Shown where bit 0 of the
+  line differs from bit 3 of the pixel, and where the tiles and sprites
+  leave black. The generator is held clear while $7004 is 0; set, it runs
+  from that moment: line 0's first step is then 131071 - (line x 512 + 6
+  x the cycles into the line) (mod 131071), and at each vertical blank the
+  origin moves back one step (the stars scroll).
+- Inputs a MAME probe sets in its frame callback reach the game at the
+  start of the next frame.
+
+To confirm: the flip latches ($7006/$7007, the cocktail cabinet), the
+watchdog's timeout, the sound latches (E2).
 
 ## 3. Phases
 
 | Phase | Work | Exit | Status |
 |---|---|---|---|
-| P0 | `git init`, skeleton from Defender, loader for the galaxian set, test card, MAME pipeline, packaging, CI, `CLAUDE.md`, README | `enhance`, `rom_load`, `mame_rom_map` pass | in progress |
-| E1 | Z80, board, video, stars; the game plays via `--emulate` (silent at first) | `mame_emu`: Z80 cycle for cycle over 100 traced frames; RAM and pictures equal at ~12 frames (`mame_capture`) | |
+| P0 | `git init`, skeleton from Defender, loader for the galaxian set, test card, MAME pipeline, packaging, CI, `CLAUDE.md`, README | `enhance`, `rom_load`, `mame_rom_map` pass | done 2026-10-22 |
+| E1 | Z80, board, video, stars; the game plays via `--emulate` (silent at first) | `mame_emu`: Z80 cycle for cycle over 100 traced frames; RAM and pictures equal at ~12 frames (`mame_capture`) | done 2026-10-22 |
 | E2 | Discrete sound model | each sound latch audibly right, its timing as MAME's wav | |
 | X1 | Extractor | `extract` | |
 | C0-C3 | RE notes; the C game piece by piece, then the default | `sim`, `game`, `routines`, `frame`; the C game plays from power-on through game over | |
@@ -107,8 +152,26 @@ asking.
   folder (CRC matching), and a clean failure on an empty folder
 - `mame_rom_map` - label `mame`: MAME's view of the program ROM
   ($0000-$27FF), the graphics and the PROM equal `galaxian --dump-rom`
-- Later: `z80` (instruction results), `mame_capture`, `mame_emu`,
-  `extract`, `sim`, `game`, `routines`, `frame` (as Defender's).
+- `z80` - always runs: every opcode's T-states (the documented counts,
+  branches taken and not), the machine cycles adding up to them, where
+  writes fall, known flag results (DAA, overflow and half carries, CP's
+  and BIT's bits 3 and 5, the block group, 16-bit arithmetic), NMI, IM 1,
+  HALT
+- `mame_capture` - label `mame`: runs the scripted game in
+  `src/tests/mame/script.cmake` (attract mode, coin, start, over a minute
+  of play), dumping RAM, tile and object RAM and the latches with a
+  snapshot at 14 frames; the static frames drawn from the dump
+  (`gfx/galaxian.c`) equal MAME's snapshots (bar the stars)
+- `mame_emu` - label `mame`: the board replays the script from power-on.
+  MAME's instruction trace of frames 1600-1700 (`trace_probe.lua`): the
+  Z80 cycle for cycle. At every captured frame RAM (bar the stack,
+  $43C0-$43FF), tile and object RAM, the latches and the picture (MAME's
+  224x768) are MAME's.
+- Later: `extract`, `sim`, `game`, `routines`, `frame` (as Defender's).
+- Probes that are not tests: `ram_probe.lua`-style dumps come from
+  `capture_probe.lua` (`PROBE_FRAMES`, `PROBE_POKE`); `test_emu` takes
+  `DUMP_DIR` (its pictures), `OBJECT_LOG=frame` (object RAM line by line),
+  `LATCH_LOG=1` and `WRITE_LOG=addr` to chase a difference.
 
 ## 5. For the sibling ports
 

@@ -45,6 +45,7 @@ cmake -S . -B build && cmake --build build -j     # build
 ctest --test-dir build                            # all tests
 ctest --test-dir build -L rom                     # tests needing the ROM set (roms/galaxian.zip)
 ctest --test-dir build -L mame                    # tests needing MAME + the ROM set
+build/galaxian --windowed                         # play: the ROM on the emulated board (finds roms/galaxian.zip in dev builds)
 build/galaxian --windowed --test-card             # the test card (ROM status, input tester)
 build/galaxian --check-rom roms/galaxian.zip      # verify a ROM set
 build/galaxian --dump-rom roms/galaxian.zip 0000 27FF   # program ROM, graphics and PROM as hex lines
@@ -55,14 +56,18 @@ emcmake cmake -S . -B build-web && cmake --build build-web --target serve   # we
 ```
 
 Release builds: `-DGALAXIAN_DEV_ASSETS=OFF` (no source-tree fallbacks).
-Later phases add `--emulate` (the ROM on the emulated board), `--input`,
+`--emulate` runs the ROM on the emulated board (today the only game; the C
+game will be the default). `--input script.txt` replays controls (lines of
+`<frame> [coin] [start] [start2] [left] [right] [fire]`). Later phases add
 `--extract` and the C game (see the plan's phase table).
 
 ## Layout (`src/`)
 
-- `main.c` - SDL setup, the fixed 60 Hz loop, the graphics pipeline, the
-  test card (`--test-card`, or no ROM set), `--frames`, `--screenshot`,
-  `--rom`, `--check-rom`, `--dump-rom`
+- `main.c` - SDL setup, the fixed 60 Hz loop running a board frame per
+  tick, the graphics pipeline, the DIP switches (`galaxian.cfg` in the
+  save folder, MAME's defaults), the test card (`--test-card`, or no ROM
+  set), `--input`, `--frames`, `--screenshot`, `--rom`, `--check-rom`,
+  `--dump-rom`
 - `platform/` - the only code that includes SDL: `video.c` (224x256
   portrait framebuffer, integer scaling or fitted with sharp bilinear,
   scanlines down the screen), `input.c` (Galaxian's control panel; pads
@@ -70,11 +75,16 @@ Later phases add `--emulate` (the ROM on the emulated board), `--input`,
 - `gfx/` - draws into the framebuffer in arcade coordinates (`fb.scale` > 1
   for HD): `fb.c`, `blit.c`, `scale.c` (Scale2x/3x, xBR), `enhance.c`
   (graphics presets, HD image registry, whole-frame filter, glow),
-  `debugfont.c` (3x5 font for diagnostics, not the ROM's)
+  `debugfont.c` (3x5 font for diagnostics, not the ROM's), `galaxian.c`
+  (a board line: tiles with per-column scroll and colour, sprites,
+  shells, stars, the PROM palette; kept at MAME's 224x768 and reduced to
+  224x256)
 - `assets/` - `rom.c` (the galaxian set from a zip or folder, matched by
   CRC), `zip.c`, `inflate.c`, `png.c`, `assets.c` (asset folder lookup),
   `savefile.c` (the save folder)
-- `emu/` - the emulated board (E1: Z80, memory map, video, NMI)
+- `emu/` - the emulated board: `z80.c` (the CPU, each memory access at
+  its T-state), `board.c` (memory map, latches, the NMI at vertical blank,
+  lines drawn lazily as MAME does, the starfield generator's restart)
 - `sim/` - the game in C (C0 on)
 - `tests/` - C tests, MAME probes (`tests/mame/`)
 - `packaging/` - release layout script, PortMaster launcher and metadata
@@ -97,8 +107,21 @@ Every change keeps `ctest` green.
 - `enhance` - always runs (scalers, presets, glow)
 - `rom_load` - label `rom`: loads the set from the zip, from renamed copies
   in a folder (CRC matching), and fails cleanly on an empty folder
+- `z80` - always runs: every opcode's T-states and machine cycles, known
+  flag results, NMI, IM 1, HALT
 - `mame_rom_map` - label `mame`: MAME's view of the program ROM, graphics
   and PROM equals `galaxian --dump-rom`
+- `mame_capture` - label `mame`: runs the scripted game in
+  `src/tests/mame/script.cmake`, dumping memory and the latches with a
+  snapshot at 14 frames; the static frames drawn from the dump equal MAME's
+- `mame_emu` - label `mame`: the board replays that script from power-on:
+  MAME's trace of frames 1600-1700 cycle for cycle; RAM (bar the stack
+  $43C0-$43FF), tile and object RAM, latches and the picture (MAME's
+  224x768) at every captured frame
+- To debug a difference: `test_emu` with `DUMP_DIR=dir` (its pictures),
+  `OBJECT_LOG=frame`, `LATCH_LOG=1`, `WRITE_LOG=addr`; `trace_probe.lua`
+  with `TRACE_FROM`/`TRACE_TO` (needs `-debug -debugger none`) against
+  `Board.step_hook`. Traces, dumps and disassembly stay in `build/`.
 - MAME tests share `build/mame` (one at a time); tests that run the game
   use their own save dir; never write to the user's home folder.
 
