@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gameList>
+  <game>
+    <path>./Galaxian.sh</path>
+    <name>Galaxian</name>
+    <desc>A native SDL2 rebuild of the 1979 Namco arcade game (work in progress). Needs your MAME galaxian.zip ROM set in ports/galaxian/. Converted by monkeyx.</desc>
+    <releasedate>19790101T000000</releasedate>
+    <developer>Namco</developer>
+    <publisher>Namco / Midway</publisher>
+    <genre>Shooter</genre>
+    <image>./galaxian/screenshot.png</image>
+  </game>
+</gameList>
