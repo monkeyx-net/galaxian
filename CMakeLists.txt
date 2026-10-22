@@ -58,6 +58,9 @@ add_library(galaxian_core STATIC
   src/sim/text.c
   src/sim/demo.c
   src/sim/screen.c
+  src/sim/flow.c
+  src/sim/boot.c
+  src/sim/frame.c
 )
 target_include_directories(galaxian_core PUBLIC src)
 target_link_libraries(galaxian_core PUBLIC m)
@@ -146,7 +149,10 @@ if(EXISTS "${GALAXIAN_ROM}")
   add_executable(test_sim src/tests/test_sim.c)
   target_link_libraries(test_sim PRIVATE galaxian_core)
   add_test(NAME sim COMMAND test_sim "${GALAXIAN_ROM}")
-  set_tests_properties(rom_load extract sim PROPERTIES LABELS rom)
+  add_executable(test_frame src/tests/test_frame.c)
+  target_link_libraries(test_frame PRIVATE galaxian_core)
+  add_test(NAME frame COMMAND test_frame "${GALAXIAN_ROM}")
+  set_tests_properties(rom_load extract sim frame PROPERTIES LABELS rom)
   # Development builds extract the assets next to the program after each build.
   if(NOT CMAKE_CROSSCOMPILING)
     add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/assets/manifest.txt"

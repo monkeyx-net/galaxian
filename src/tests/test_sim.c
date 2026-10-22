@@ -22,6 +22,8 @@
 #include "sim/attack.h"
 #include "sim/coins.h"
 #include "sim/demo.h"
+#include "sim/flow.h"
+#include "sim/frame.h"
 #include "sim/game.h"
 #include "sim/player.h"
 #include "sim/screen.h"
@@ -113,7 +115,20 @@ static void a_cmd7(Game *g, Regs *r) { screen_command(g, 7, r->a); }
 static void a_idle(Game *g, Regs *r) { screen_idle(g); }
 static void a_ships(Game *g, Regs *r) { screen_ships(g, r->b); }
 
+static void a_nmi(Game *g, Regs *r) { frame_nmi(g); }
+static void a_state(Game *g, Regs *r) { flow_state(g); }
+static void a_play(Game *g, Regs *r) { flow_play(g); }
+static void a_quiet(Game *g, Regs *r) { flow_quiet(g); }
+
 static Routine routines[] = {
+    { 0x0066, "NMI", a_nmi, 0, 0, 0, 0, 0 },
+    { 0x00E6, "state 0", a_state, 0, 0, 0, 0, 0 },
+    { 0x0156, "state 1 (attract)", a_state, 0, 0, 0, 0, 0 },
+    { 0x03F2, "state 2 (start)", a_state, 0, 0, 0, 0, 0 },
+    { 0x0536, "state 3 (player one)", a_state, 0, 0, 0, 0, 0 },
+    { 0x077B, "state 4 (player two)", a_state, 0, 0, 0, 0, 0 },
+    { 0x0661, "play", a_play, 0, 0, 0, 0, 0 },
+    { 0x1CB5, "quiet", a_quiet, 0, 0, 0, 0, 0 },
     { 0x003C, "random", a_random, OUT_A | OUT_B, 0, 0, 0, 0 },
     { 0x0048, "divide", a_divide, OUT_A | OUT_B | OUT_C | OUT_D, 0, 0, 0, 0 },
     { 0x08F2, "queue", a_queue, 0, 0, 0, 0, 0 },
