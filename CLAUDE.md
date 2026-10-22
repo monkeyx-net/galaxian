@@ -61,14 +61,16 @@ Release builds: `-DGALAXIAN_DEV_ASSETS=OFF` (no source-tree fallbacks).
 The game in C is the default, reading only `assets/` (extracted from the
 ROM set on the first start if missing); `--emulate` runs the ROM on the
 emulated board. `--input script.txt` replays controls (lines of
-`<frame> [coin] [start] [start2] [left] [right] [fire]`).
+`<frame> [coin] [start] [start2] [left] [right] [fire] [up] [down] [menu]`;
+`menu` presses F2 on that line's first frame).
 
 ## Layout (`src/`)
 
 - `main.c` - SDL setup, the fixed 60 Hz loop running a frame of the C game
   per tick (`--emulate`: a board frame), the C game drawn from its memory
   and heard through the sound model, the graphics pipeline, the DIP
-  switches (`galaxian.cfg` in the save folder, MAME's defaults), the high
+  switches (`galaxian.cfg` in the save folder, MAME's defaults; the
+  operator menu on F2 / Select+R1 changes them, the game waiting), the high
   score saved (`galaxian.hiscore`), the controls page over the attract
   mode (30 s idle), the test card (`--test-card`, or no ROM set),
   `--input`, `--frames`, `--screenshot`, `--rom`, `--check-rom`,

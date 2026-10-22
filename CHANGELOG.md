@@ -3,6 +3,14 @@
 ---
 ## Changelog
 
+### Unreleased
+
+#### Port
+
+- **Operator menu** — F2 (Select+R1 on a pad) opens the DIP switches over
+  the game, which waits: coinage, bonus ship, lives and cabinet, saved to
+  `galaxian.cfg` when it closes.
+
 ### v0.2.0 (2026-10-22)
 
 #### Game

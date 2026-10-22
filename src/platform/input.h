@@ -11,6 +11,7 @@
  *   coin       Select                       5
  *   start      Start (1P), L1+Start (2P)    1 or Enter / 2
  *   graphics   Select+L1                    F3 (F4 glow, F5 scanlines)
+ *   operator menu Select+R1               F2 (up/down, left/right in it)
  *   quit       hold Select+Start 1 s        Esc
  */
 #ifndef GALAXIAN_INPUT_H
@@ -24,6 +25,7 @@
 
 typedef struct {
     int move_x;          /* -1 left, 0, 1 right */
+    int move_y;          /* -1 up, 0, 1 down (the operator menu) */
     bool fire;
     bool coin;
     bool start;          /* 1-player start */
@@ -32,6 +34,7 @@ typedef struct {
     bool gfx_next;       /* Select+L1 or F3, edge-triggered: next graphics preset */
     bool gfx_glow;       /* F4, edge-triggered */
     bool gfx_scanlines;  /* F5, edge-triggered */
+    bool menu;           /* Select+R1 or F2, edge-triggered: the operator menu */
     int pads;            /* game controllers connected */
 } InputFrame;
 

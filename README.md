@@ -12,7 +12,8 @@ scripted games. It reads only the assets `--extract` writes once from
 your ROM set. The sound is a model of the board's discrete circuit,
 measured from MAME. `--emulate` runs the ROM's own code on the emulated
 board instead. The port adds enhanced graphics presets, pad controls,
-the DIP switches in a settings file and high-score saving. See
+the DIP switches in an operator menu (saved to `galaxian.cfg`) and
+high-score saving. See
 [GALAXIAN_PORT_PLAN.md](GALAXIAN_PORT_PLAN.md).
 
 You need your own MAME `galaxian` ROM set (`galaxian.zip`); none is included.
@@ -39,6 +40,7 @@ every connected pad drives the panel.
 | Next graphics preset | Select + L1 | F3 |
 | Glow on / off | | F4 |
 | CRT scanlines on / off | | F5 |
+| Operator menu | Select + R1 | F2 |
 | Quit | hold Select + Start for 1 s | Esc |
 
 ## Building

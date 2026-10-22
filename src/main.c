@@ -16,8 +16,9 @@
  * --frames N stops after N updates; with --screenshot the last frame is
  * written as a PNG (use SDL_VIDEODRIVER=dummy to run headless).
  * --input replays scripted controls: lines of "<frame> [coin] [start]
- * [start2] [left] [right] [fire]", each holding from that frame until the
- * next line (live controls still quit).
+ * [start2] [left] [right] [fire] [up] [down] [menu]", each holding from
+ * that frame until the next line ("menu" a press of F2 on its first frame;
+ * live controls still quit).
  * --dump-rom prints "ADDR BYTE" lines (hex) for Z80 addresses first..last
  * in the program ROM, then "G:ADDR BYTE" for the graphics ROMs (1h at
  * $000, 1k at $800) and "P:ADDR BYTE" for the palette PROM: the format the
@@ -100,6 +101,9 @@ typedef struct {
     uint8_t hiscore[3];  /* $40A8-$40AA as last saved (BCD, $40AA the top digits) */
     int hiscore_placed;  /* put into the game's RAM after its power-on */
     int hiscore_wait;
+    int menu;            /* the operator menu is open: the game waits */
+    int menu_row;
+    InputFrame menu_was; /* the controls last tick, for the menu's presses */
 } Port;
 
 static Port g;
@@ -184,32 +188,43 @@ static void draw_scene(Framebuffer *t)
    lines "coinage 1c1c|2c1c|1c2c|free", "bonus 7000|10000|12000|20000",
    "lives 2|3", "cabinet upright|cocktail" (the cocktail table turns the
    picture for player two). The file is written with the defaults if
-   missing. */
+   missing, and again when the operator menu closes. */
+static const char *const COINAGE_NAMES[4] = { "1c1c", "2c1c", "1c2c", "free" };
+static const char *const BONUS_NAMES[4] = { "7000", "10000", "12000", "20000" };
+
+static void settings_save(void)
+{
+    char text[512];
+    int n = snprintf(text, sizeof text,
+                     "# Galaxian's DIP switches (MAME's defaults: 1c1c 7000 3 upright; F2 in the game)\n"
+                     "coinage %s\n# 1c1c 2c1c 1c2c free\n"
+                     "bonus %s\n# 7000 10000 12000 20000\n"
+                     "lives %d\n# 2 3\n"
+                     "cabinet %s\n# upright cocktail\n",
+                     COINAGE_NAMES[g.coinage >> 6], BONUS_NAMES[g.dips & IN2_BONUS], g.dips & IN2_LIVES3 ? 3 : 2,
+                     g.cocktail ? "cocktail" : "upright");
+    if (save_store(SETTINGS_FILE, text, (size_t)n)) fprintf(stderr, "galaxian: cannot save %s\n", save_path(SETTINGS_FILE));
+}
+
 static void settings_load(void)
 {
     g.dips = IN2_DEFAULT;
     g.coinage = 0x00;
+    g.cocktail = 0;
     FILE *f = fopen(save_path(SETTINGS_FILE), "r");
     if (!f) {
-        static const char defaults[] = "# Galaxian's DIP switches (MAME's defaults)\n"
-                                       "coinage 1c1c\n# 1c1c 2c1c 1c2c free\n"
-                                       "bonus 7000\n# 7000 10000 12000 20000\n"
-                                       "lives 3\n# 2 3\n"
-                                       "cabinet upright\n# upright cocktail\n";
-        save_store(SETTINGS_FILE, defaults, sizeof defaults - 1);
+        settings_save();
         return;
     }
     char line[128], key[32], value[32];
     while (fgets(line, sizeof line, f)) {
         if (line[0] == '#' || sscanf(line, "%31s %31s", key, value) != 2) continue;
         if (!strcmp(key, "coinage")) {
-            static const char *const names[4] = { "1c1c", "2c1c", "1c2c", "free" };
             for (int i = 0; i < 4; i++)
-                if (!strcmp(value, names[i])) g.coinage = (uint8_t)(i << 6);
+                if (!strcmp(value, COINAGE_NAMES[i])) g.coinage = (uint8_t)(i << 6);
         } else if (!strcmp(key, "bonus")) {
-            static const char *const names[4] = { "7000", "10000", "12000", "20000" };
             for (int i = 0; i < 4; i++)
-                if (!strcmp(value, names[i])) g.dips = (uint8_t)((g.dips & ~IN2_BONUS) | i);
+                if (!strcmp(value, BONUS_NAMES[i])) g.dips = (uint8_t)((g.dips & ~IN2_BONUS) | i);
         } else if (!strcmp(key, "lives")) {
             if (!strcmp(value, "2")) g.dips &= (uint8_t)~IN2_LIVES3;
             else if (!strcmp(value, "3")) g.dips |= IN2_LIVES3;
@@ -371,6 +386,75 @@ static void c_step(const InputFrame *in)
     audio_stream(caudio, BOARD_AUDIO_SAMPLES, BOARD_AUDIO_SAMPLES * FRAME_HZ);
 }
 
+/* ---- the operator menu: the DIP switches ------------------------------------------------------- */
+
+/* F2 or Select+R1 opens it over the game, which waits; up/down choose a
+   switch, left/right (or fire) change it, F2 or Select+R1 again saves
+   galaxian.cfg and goes on. The game reads the switches as the board does:
+   the coinage at each coin, lives, bonus and cabinet when a game starts. */
+#define DIP_ROWS 4
+
+static const struct { const char *what; int n; const char *names[4]; } DIPS[DIP_ROWS] = {
+    { "COINAGE", 4, { "1 COIN 1 CREDIT", "2 COINS 1 CREDIT", "1 COIN 2 CREDITS", "FREE PLAY" } },
+    { "BONUS SHIP", 4, { "7000", "10000", "12000", "20000" } },
+    { "LIVES", 2, { "2", "3" } },
+    { "CABINET", 2, { "UPRIGHT", "COCKTAIL" } },
+};
+
+static int dip_get(int row)
+{
+    switch (row) {
+    case 0: return g.coinage >> 6;
+    case 1: return g.dips & IN2_BONUS;
+    case 2: return (g.dips & IN2_LIVES3) != 0;
+    default: return g.cocktail;
+    }
+}
+
+static void dip_set(int row, int v)
+{
+    switch (row) {
+    case 0: g.coinage = (uint8_t)(v << 6); break;
+    case 1: g.dips = (uint8_t)((g.dips & ~IN2_BONUS) | v); break;
+    case 2: g.dips = (uint8_t)(v ? g.dips | IN2_LIVES3 : g.dips & ~IN2_LIVES3); break;
+    default: g.cocktail = v; break;
+    }
+}
+
+static void menu_step(const InputFrame *in)
+{
+    const InputFrame *was = &g.menu_was;
+    if (in->move_y && in->move_y != was->move_y) g.menu_row = (g.menu_row + in->move_y + DIP_ROWS) % DIP_ROWS;
+    int dx = in->move_x && in->move_x != was->move_x ? in->move_x : 0;
+    if (in->fire && !was->fire) dx = 1;
+    if (dx) {
+        int n = DIPS[g.menu_row].n;
+        dip_set(g.menu_row, (dip_get(g.menu_row) + dx + n) % n);
+    }
+    g.menu_was = *in;
+}
+
+/* Over the game's last frame, which stays in fb while the menu is open:
+   drawn opaque, as it is drawn again each tick. */
+static void draw_menu(Framebuffer *t)
+{
+    const int x0 = 8, y0 = 56, w = FB_WIDTH - 16, h = 124;
+    fill_rectf(t, x0, y0, w, h, 0x000000);
+    fill_rectf(t, x0, y0, w, 1, ORANGE);
+    fill_rectf(t, x0, y0 + h - 1, w, 1, ORANGE);
+    centred(t, y0 + 8, "GALAXIAN  -  OPERATOR MENU", YELLOW);
+    int y = y0 + 26;
+    for (int r = 0; r < DIP_ROWS; r++, y += 12) {
+        int on = r == g.menu_row;
+        if (on) debug_text(t, x0 + 6, y, ">", YELLOW);
+        debug_text(t, x0 + 14, y, DIPS[r].what, on ? YELLOW : WHITE);
+        debug_text(t, x0 + 84, y, DIPS[r].names[dip_get(r)], on ? YELLOW : GREEN);
+    }
+    centred(t, y0 + h - 40, "UP/DOWN CHOOSE   LEFT/RIGHT CHANGE", GREY);
+    centred(t, y0 + h - 30, "LIVES, BONUS, CABINET: FROM THE NEXT GAME", GREY);
+    centred(t, y0 + h - 14, "F2 / SELECT+R1: SAVE AND PLAY", CYAN);
+}
+
 /* ---- the controls page ---------------------------------------------------------- */
 
 /* In a game ($4006 bit 0) or not (the attract mode, push start). */
@@ -380,7 +464,7 @@ static bool any_input(const InputFrame *in) { return in->move_x || in->fire || i
 
 static bool controls_page_up(void)
 {
-    if (g.test_card || g.idle < CONTROLS_IDLE_FRAMES) return false;
+    if (g.test_card || g.menu || g.idle < CONTROLS_IDLE_FRAMES) return false;
     return (g.idle - CONTROLS_IDLE_FRAMES) % (CONTROLS_IDLE_FRAMES + CONTROLS_SHOW_FRAMES) < CONTROLS_SHOW_FRAMES;
 }
 
@@ -392,6 +476,7 @@ static const struct { const char *what, *pad, *keys; } CONTROLS[] = {
     { "2 PLAYERS", "L1+START", "2" },
     { "GRAPHICS", "SELECT+L1", "F3" },
     { "GLOW, CRT", "", "F4, F5" },
+    { "OPERATOR MENU", "SELECT+R1", "F2" },
     { "EXIT", "SELECT+START", "ESC" },
 };
 
@@ -426,6 +511,7 @@ static void draw(int display_scale)
     shown = &fb;
     if (!g.test_card) { /* the game's picture, already in fb; only pixels, so HD upscales it like FILTER */
         if (controls_page_up()) draw_controls(&fb);
+        if (g.menu) draw_menu(&fb);
         if (g.gfx_notice > 0) {
             char text[80];
             snprintf(text, sizeof text, "GRAPHICS: %s", gfx_describe(&g.gfx));
@@ -453,6 +539,17 @@ static void step(const InputFrame *in)
     static bool coin_was;
     g.clock++;
     g.in = *in;
+    if (in->menu && !g.test_card) {
+        if (g.menu) settings_save();
+        g.menu = !g.menu;
+        g.menu_was = *in;
+    }
+    if (g.menu) { /* the game waits */
+        static const int16_t quiet[BOARD_AUDIO_SAMPLES];
+        menu_step(in);
+        audio_stream(quiet, BOARD_AUDIO_SAMPLES, BOARD_AUDIO_SAMPLES * FRAME_HZ);
+        return;
+    }
     if (g.c_game) {
         c_step(in);
         g.idle = game_running() || any_input(in) ? 0 : g.idle + 1;
@@ -585,6 +682,9 @@ static int load_script(const char *path)
             else if (!strcmp(tok, "left")) l->in.move_x = -1;
             else if (!strcmp(tok, "right")) l->in.move_x = 1;
             else if (!strcmp(tok, "fire")) l->in.fire = true;
+            else if (!strcmp(tok, "up")) l->in.move_y = -1;
+            else if (!strcmp(tok, "down")) l->in.move_y = 1;
+            else if (!strcmp(tok, "menu")) l->in.menu = true;
             else fprintf(stderr, "galaxian: %s: unknown token '%s'\n", path, tok);
         }
         script_len++;
@@ -600,6 +700,7 @@ static void apply_script(InputFrame *in, long frame)
     bool quit = in->quit;
     if (script[script_pos].frame <= frame) *in = script[script_pos].in;
     else memset(in, 0, sizeof *in);
+    in->menu = in->menu && script[script_pos].frame == frame; /* a press, on the line's first frame */
     in->quit = quit;
 }
 
@@ -726,6 +827,7 @@ int main(int argc, char **argv)
     while (run_once()) {}
 
     if (!g.test_card) hiscore_check(g.c_game ? cg.ram : g.board.ram, 1);
+    if (g.menu) settings_save();
     audio_shutdown();
     input_shutdown();
     video_shutdown();

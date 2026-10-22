@@ -39,8 +39,9 @@ MAME harness), itself from the Joust and Robotron ports. The hardware
    2P, Select+L1 = graphics presets, hold Select+Start 1 s = exit.
    Keyboard: arrows left/right, Space/Ctrl fire, 5 coin, 1/Enter and 2
    start, F3 presets, F4 glow, F5 scanlines, Esc exit. The DIP switches
-   (coinage, bonus life, lives) come from a settings file (`galaxian.cfg`)
-   with MAME's defaults.
+   (coinage, bonus life, lives, cabinet) come from a settings file
+   (`galaxian.cfg`) with MAME's defaults; the operator menu (F2,
+   Select+R1) changes them while the game waits and saves the file.
 5. **Enhanced graphics** as in the Defender port (FILTER and HD presets,
    glow, scanlines), cosmetic only, classic by default. The screen is
    portrait (224x256, the monitor turned 90 degrees): integer scaling where
