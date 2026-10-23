@@ -3,6 +3,15 @@
 ---
 ## Changelog
 
+### v0.2.2 (2026-10-23)
+
+#### Port
+
+- **Lower CPU use** — the graphics presets' scalers (Scale2x/3x, xBR)
+  read their neighbours without bounds checks inside the picture, write
+  flat areas at once and skip the premultiply pass for the opaque game
+  frame; the pictures are the same, bit for bit.
+
 ### v0.2.1 (2026-10-22)
 
 #### Port
