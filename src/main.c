@@ -7,12 +7,15 @@
  * switches (galaxian.cfg in the save folder) and, later, high-score saving. --test-card shows the test card instead (ROM status, an
  * input tester and the graphics presets).
  *
- *   galaxian [--windowed] [--gfx preset] [--rom path] [--test-card] [--emulate]
- *            [--input script.txt] [--frames N] [--screenshot out.png]
+ *   galaxian [--windowed] [--gfx preset] [--scale mode] [--rotate degrees] [--rom path]
+ *            [--test-card] [--emulate] [--input script.txt] [--frames N] [--screenshot out.png]
  *   galaxian --check-rom <dir|zip>
  *   galaxian --dump-rom <dir|zip> <first> <last>
  *   galaxian --extract <dir|zip> [<asset dir>]
  *
+ * --scale auto|integer|fit|stretch and --rotate 0|90|270 (clockwise, for a
+ * landscape device held on its side) lay the picture out (platform/screen.h);
+ * galaxian.cfg keeps them, F6 and F7 or the operator menu change them.
  * --frames N stops after N updates; with --screenshot the last frame is
  * written as a PNG (use SDL_VIDEODRIVER=dummy to run headless).
  * --input replays scripted controls: lines of "<frame> [coin] [start]
@@ -46,6 +49,7 @@
 #include "gfx/galaxian.h"
 #include "platform/audio.h"
 #include "platform/input.h"
+#include "platform/screen.h"
 #include "platform/video.h"
 #include "sim/boot.h"
 #include "sim/frame.h"
@@ -85,7 +89,9 @@ typedef struct {
     unsigned long clock;
     InputFrame in;
     GfxSettings gfx;
+    ScreenSettings screen; /* the scale mode and rotation (galaxian.cfg) */
     int gfx_notice;
+    int notice_screen;     /* the notice is the screen's, not the graphics' */
     int coins;
     char rom_path[1024];
     char rom_error[256];
@@ -103,6 +109,7 @@ typedef struct {
     int hiscore_wait;
     int menu;            /* the operator menu is open: the game waits */
     int menu_row;
+    int menu_hold;       /* the screen turned: directions wait for a release */
     InputFrame menu_was; /* the controls last tick, for the menu's presses */
 } Port;
 
@@ -174,8 +181,10 @@ static void draw_scene(Framebuffer *t)
     }
 
     snprintf(line, sizeof line, "GRAPHICS: %s", gfx_describe(&g.gfx));
-    centred(t, 184, line, g.gfx_notice > 0 ? YELLOW : WHITE);
+    centred(t, 184, line, g.gfx_notice > 0 && !g.notice_screen ? YELLOW : WHITE);
     centred(t, 192, "SELECT+L1 / F3, F4 GLOW, F5 SCANLINES", GREY);
+    snprintf(line, sizeof line, "SCREEN: %s   F6 SCALE, F7 TURN", screen_describe(&g.screen));
+    centred(t, 212, line, g.gfx_notice > 0 && g.notice_screen ? YELLOW : GREY);
     snprintf(line, sizeof line, "FRAME %lu   RENDER %dX", g.clock, t->scale);
     centred(t, 204, line, GREY);
     centred(t, 220, "EXIT: HOLD SELECT+START OR ESC", GREY);
@@ -192,17 +201,27 @@ static void draw_scene(Framebuffer *t)
 static const char *const COINAGE_NAMES[4] = { "1c1c", "2c1c", "1c2c", "free" };
 static const char *const BONUS_NAMES[4] = { "7000", "10000", "12000", "20000" };
 
+/* The screen's settings: the layout and the joystick turn together */
+static void screen_apply(void)
+{
+    video_set_screen(&g.screen);
+    input_set_rotation(g.screen.rotate);
+}
+
 static void settings_save(void)
 {
-    char text[512];
+    char text[768];
     int n = snprintf(text, sizeof text,
                      "# Galaxian's DIP switches (MAME's defaults: 1c1c 7000 3 upright; F2 in the game)\n"
                      "coinage %s\n# 1c1c 2c1c 1c2c free\n"
                      "bonus %s\n# 7000 10000 12000 20000\n"
                      "lives %d\n# 2 3\n"
-                     "cabinet %s\n# upright cocktail\n",
+                     "cabinet %s\n# upright cocktail\n"
+                     "# The screen (the port's; F6, F7): scale auto integer fit stretch;\n"
+                     "# rotate 0 90 270 (clockwise: a landscape device held on its side)\n"
+                     "scale %s\nrotate %d\n",
                      COINAGE_NAMES[g.coinage >> 6], BONUS_NAMES[g.dips & IN2_BONUS], g.dips & IN2_LIVES3 ? 3 : 2,
-                     g.cocktail ? "cocktail" : "upright");
+                     g.cocktail ? "cocktail" : "upright", screen_mode_name(g.screen.mode), g.screen.rotate);
     if (save_store(SETTINGS_FILE, text, (size_t)n)) fprintf(stderr, "galaxian: cannot save %s\n", save_path(SETTINGS_FILE));
 }
 
@@ -213,7 +232,7 @@ static void settings_load(void)
     g.cocktail = 0;
     FILE *f = fopen(save_path(SETTINGS_FILE), "r");
     if (!f) {
-        settings_save();
+        if (!g.test_card) settings_save();
         return;
     }
     char line[128], key[32], value[32];
@@ -230,6 +249,10 @@ static void settings_load(void)
             else if (!strcmp(value, "3")) g.dips |= IN2_LIVES3;
         } else if (!strcmp(key, "cabinet")) {
             g.cocktail = !strcmp(value, "cocktail");
+        } else if (!strcmp(key, "scale") && screen_mode_parse(value) >= 0) {
+            g.screen.mode = screen_mode_parse(value);
+        } else if (!strcmp(key, "rotate") && screen_rotate_parse(value) >= 0) {
+            g.screen.rotate = screen_rotate_parse(value);
         }
     }
     fclose(f);
@@ -387,12 +410,14 @@ static void c_step(const InputFrame *in)
     audio_stream(caudio, BOARD_AUDIO_SAMPLES, BOARD_AUDIO_SAMPLES * FRAME_HZ);
 }
 
-/* ---- the operator menu: the DIP switches ------------------------------------------------------- */
+/* ---- the operator menu: the DIP switches, the screen ------------------------------------------- */
 
 /* F2 or Select+R1 opens it over the game, which waits; up/down choose a
    switch, left/right (or fire) change it, F2 or Select+R1 again saves
    galaxian.cfg and goes on. The game reads the switches as the board does:
-   the coinage at each coin, lives, bonus and cabinet when a game starts. */
+   the coinage at each coin, lives, bonus and cabinet when a game starts.
+   The last two rows are the port's: the screen's rotation and scale mode,
+   applied at once. */
 #define DIP_ROWS 4
 
 static const struct { const char *what; int n; const char *names[4]; } DIPS[DIP_ROWS] = {
@@ -422,15 +447,59 @@ static void dip_set(int row, int v)
     }
 }
 
+#define MENU_ROWS (DIP_ROWS + 2)
+#define ROW_ROTATE DIP_ROWS
+#define ROW_SCALE (DIP_ROWS + 1)
+
+static const int ROTATIONS[3] = { 0, 90, 270 };
+static const char *const ROTATE_NAMES[3] = { "NONE", "90 (TOP AT THE RIGHT)", "270 (TOP AT THE LEFT)" };
+static const char *const SCALE_NAMES[SCREEN_MODES] = { "AUTO", "INTEGER", "FIT", "STRETCH" };
+
+static int menu_count(int row) { return row == ROW_ROTATE ? 3 : row == ROW_SCALE ? SCREEN_MODES : DIPS[row].n; }
+static const char *menu_what(int row) { return row == ROW_ROTATE ? "ROTATE" : row == ROW_SCALE ? "SCALE" : DIPS[row].what; }
+
+static int menu_get(int row)
+{
+    if (row == ROW_ROTATE) return g.screen.rotate == 90 ? 1 : g.screen.rotate == 270 ? 2 : 0;
+    if (row == ROW_SCALE) return g.screen.mode;
+    return dip_get(row);
+}
+
+static void menu_set(int row, int i)
+{
+    if (row == ROW_ROTATE) {
+        g.screen.rotate = ROTATIONS[i];
+        g.menu_hold = 1; /* the held direction turns too */
+        screen_apply();
+    } else if (row == ROW_SCALE) {
+        g.screen.mode = i;
+        screen_apply();
+    } else {
+        dip_set(row, i);
+    }
+}
+
+static const char *menu_name(int row, int i)
+{
+    if (row == ROW_ROTATE) return ROTATE_NAMES[i];
+    if (row == ROW_SCALE) return SCALE_NAMES[i];
+    return DIPS[row].names[i];
+}
+
 static void menu_step(const InputFrame *in)
 {
     const InputFrame *was = &g.menu_was;
-    if (in->move_y && in->move_y != was->move_y) g.menu_row = (g.menu_row + in->move_y + DIP_ROWS) % DIP_ROWS;
+    if (g.menu_hold && (in->move_x || in->move_y)) {
+        g.menu_was = *in;
+        return;
+    }
+    g.menu_hold = 0;
+    if (in->move_y && in->move_y != was->move_y) g.menu_row = (g.menu_row + in->move_y + MENU_ROWS) % MENU_ROWS;
     int dx = in->move_x && in->move_x != was->move_x ? in->move_x : 0;
     if (in->fire && !was->fire) dx = 1;
     if (dx) {
-        int n = DIPS[g.menu_row].n;
-        dip_set(g.menu_row, (dip_get(g.menu_row) + dx + n) % n);
+        int n = menu_count(g.menu_row);
+        menu_set(g.menu_row, (menu_get(g.menu_row) + dx + n) % n);
     }
     g.menu_was = *in;
 }
@@ -439,17 +508,18 @@ static void menu_step(const InputFrame *in)
    drawn opaque, as it is drawn again each tick. */
 static void draw_menu(Framebuffer *t)
 {
-    const int x0 = 8, y0 = 56, w = FB_WIDTH - 16, h = 124;
+    const int x0 = 8, y0 = 48, w = FB_WIDTH - 16, h = 144;
     fill_rectf(t, x0, y0, w, h, 0x000000);
     fill_rectf(t, x0, y0, w, 1, ORANGE);
     fill_rectf(t, x0, y0 + h - 1, w, 1, ORANGE);
     centred(t, y0 + 8, "GALAXIAN  -  OPERATOR MENU", YELLOW);
     int y = y0 + 26;
-    for (int r = 0; r < DIP_ROWS; r++, y += 12) {
+    for (int r = 0; r < MENU_ROWS; r++, y += 12) {
         int on = r == g.menu_row;
+        if (r == ROW_ROTATE) y += 4; /* the port's, apart */
         if (on) debug_text(t, x0 + 6, y, ">", YELLOW);
-        debug_text(t, x0 + 14, y, DIPS[r].what, on ? YELLOW : WHITE);
-        debug_text(t, x0 + 84, y, DIPS[r].names[dip_get(r)], on ? YELLOW : GREEN);
+        debug_text(t, x0 + 14, y, menu_what(r), on ? YELLOW : WHITE);
+        debug_text(t, x0 + 84, y, menu_name(r, menu_get(r)), on ? YELLOW : GREEN);
     }
     centred(t, y0 + h - 40, "UP/DOWN CHOOSE   LEFT/RIGHT CHANGE", GREY);
     centred(t, y0 + h - 30, "LIVES, BONUS, CABINET: FROM THE NEXT GAME", GREY);
@@ -477,6 +547,7 @@ static const struct { const char *what, *pad, *keys; } CONTROLS[] = {
     { "2 PLAYERS", "L1+START", "2" },
     { "GRAPHICS", "SELECT+L1", "F3" },
     { "GLOW, CRT", "", "F4, F5" },
+    { "SCALE, ROTATE", "MENU", "F6, F7" },
     { "OPERATOR MENU", "SELECT+R1", "F2" },
     { "EXIT", "SELECT+START", "ESC" },
 };
@@ -484,7 +555,7 @@ static const struct { const char *what, *pad, *keys; } CONTROLS[] = {
 /* Over the game's frame (cosmetic: the next frame is the arcade's again). */
 static void draw_controls(Framebuffer *t)
 {
-    const int x0 = 8, y0 = 40, w = FB_WIDTH - 16, h = 150;
+    const int x0 = 8, y0 = 36, w = FB_WIDTH - 16, h = 160;
     fill_rectf_alpha(t, x0, y0, w, h, 0x000000, 0.94);
     fill_rectf(t, x0, y0, w, 1, ORANGE);
     fill_rectf(t, x0, y0 + h - 1, w, 1, ORANGE);
@@ -515,7 +586,8 @@ static void draw(int display_scale)
         if (g.menu) draw_menu(&fb);
         if (g.gfx_notice > 0) {
             char text[80];
-            snprintf(text, sizeof text, "GRAPHICS: %s", gfx_describe(&g.gfx));
+            if (g.notice_screen) snprintf(text, sizeof text, "SCREEN: %s", screen_describe(&g.screen));
+            else snprintf(text, sizeof text, "GRAPHICS: %s", gfx_describe(&g.gfx));
             fill_rectf(&fb, 0, FB_HEIGHT - 9, FB_WIDTH, 9, 0x000000);
             centred(&fb, FB_HEIGHT - 7, text, YELLOW);
         }
@@ -571,6 +643,15 @@ static void step(const InputFrame *in)
         if (in->gfx_glow) g.gfx.glow = !g.gfx.glow;
         if (in->gfx_scanlines) g.gfx.scanlines = !g.gfx.scanlines;
         g.gfx_notice = GFX_NOTICE_FRAMES;
+        g.notice_screen = 0;
+    }
+    if (in->screen_mode || in->screen_rotate) {
+        if (in->screen_mode) g.screen.mode = (g.screen.mode + 1) % SCREEN_MODES;
+        if (in->screen_rotate) g.screen.rotate = screen_rotate_next(g.screen.rotate);
+        screen_apply();
+        if (!g.test_card) settings_save();
+        g.gfx_notice = GFX_NOTICE_FRAMES;
+        g.notice_screen = 1;
     }
     if (g.gfx_notice > 0) g.gfx_notice--;
 }
@@ -763,6 +844,7 @@ static void web_frame(void) { run_once(); }
 int main(int argc, char **argv)
 {
     bool windowed = false;
+    int want_scale = -1, want_rotate = -1;
     const char *rom_arg = NULL;
     g.c_game = 1;
     if (argc == 3 && !strcmp(argv[1], "--check-rom")) return check_rom(argv[2]);
@@ -775,6 +857,18 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--rom") && i + 1 < argc) rom_arg = argv[++i];
         else if (!strcmp(argv[i], "--test-card")) g.test_card = 1;
         else if (!strcmp(argv[i], "--emulate")) g.c_game = 0;
+        else if (!strcmp(argv[i], "--scale") && i + 1 < argc) {
+            if ((want_scale = screen_mode_parse(argv[++i])) < 0) {
+                fprintf(stderr, "galaxian: unknown --scale '%s' (one of: auto integer fit stretch)\n", argv[i]);
+                return 2;
+            }
+        }
+        else if (!strcmp(argv[i], "--rotate") && i + 1 < argc) {
+            if ((want_rotate = screen_rotate_parse(argv[++i])) < 0) {
+                fprintf(stderr, "galaxian: --rotate takes 0, 90 or 270\n");
+                return 2;
+            }
+        }
         else if (!strcmp(argv[i], "--input") && i + 1 < argc) {
             if (load_script(argv[++i])) return 2;
         }
@@ -785,7 +879,8 @@ int main(int argc, char **argv)
             }
         } else {
             fprintf(stderr,
-                    "usage: %s [--windowed] [--gfx preset] [--rom path] [--test-card] [--emulate]\n"
+                    "usage: %s [--windowed] [--gfx preset] [--scale auto|integer|fit|stretch]\n"
+                    "          [--rotate 0|90|270] [--rom path] [--test-card] [--emulate]\n"
                     "          [--input script.txt] [--frames N] [--screenshot out.png]\n"
                     "       %s --check-rom <dir|zip>\n"
                     "       %s --dump-rom <dir|zip> <first> <last>\n"
@@ -811,8 +906,11 @@ int main(int argc, char **argv)
         g.c_game = 0;
     }
     if (!g.c_game && !g.rom.loaded) g.test_card = 1; /* nothing to run: show why */
+    settings_load(); /* the screen's settings for the test card too; the file is made by the game */
+    if (want_scale >= 0) g.screen.mode = want_scale;
+    if (want_rotate >= 0) g.screen.rotate = want_rotate;
+    screen_apply();
     if (!g.test_card) {
-        settings_load();
         if (!g.c_game) {
             board_init(&g.board, &g.rom);
             g.board.video.no_native = 1;

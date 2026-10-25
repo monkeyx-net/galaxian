@@ -38,7 +38,7 @@ MAME harness), itself from the Joust and Robotron ports. The hardware
    fire; every pad drives the panel. Select = coin, Start = 1P, L1+Start =
    2P, Select+L1 = graphics presets, hold Select+Start 1 s = exit.
    Keyboard: arrows left/right, Space/Ctrl fire, 5 coin, 1/Enter and 2
-   start, F3 presets, F4 glow, F5 scanlines, Esc exit. The DIP switches
+   start, F3 presets, F4 glow, F5 scanlines, F6 scale mode, F7 rotation, Esc exit. The DIP switches
    (coinage, bonus life, lives, cabinet) come from a settings file
    (`galaxian.cfg`) with MAME's defaults; the operator menu (F2,
    Select+R1) changes them while the game waits and saves the file.
@@ -46,7 +46,13 @@ MAME harness), itself from the Joust and Robotron ports. The hardware
    glow, scanlines), cosmetic only, classic by default. The screen is
    portrait (224x256, the monitor turned 90 degrees): integer scaling where
    it fills the screen, else fitted (640x480 handhelds: 1.875x, sharp
-   bilinear, pillarboxed); the scanlines run down the screen.
+   bilinear, pillarboxed); the scanlines run down the arcade's picture.
+   The scale mode (auto, integer, fit, stretch) and a rotation (90 or 270
+   clockwise, for a landscape device held on its side, the joystick
+   turned with it) are the player's: `--scale`, `--rotate`, F6/F7 or the
+   operator menu, kept in `galaxian.cfg` (2026-10-25, from the Galaga
+   port). Turned, 640x480 gets an exact 2x (512x448), 1280x720 an exact
+   3x; 720x720 stays 2.81x fitted whichever way.
 6. **The game in C.** The game logic is rewritten in C (`src/sim/`), from
    the ROM's behaviour (traces, probes, the disassembly MAME writes to
    `build/re`, never committed), routine by routine, each mirroring the
@@ -298,6 +304,8 @@ asking.
 ## 4. Tests
 
 - `enhance` - always runs (scalers, presets, glow)
+- `screen` - always runs: the scale modes and rotations laid out on the
+  devices' screens, the joystick turned with the picture
 - `rom_load` - label `rom`: the set from the zip, from renamed copies in a
   folder (CRC matching), and a clean failure on an empty folder
 - `mame_rom_map` - label `mame`: MAME's view of the program ROM

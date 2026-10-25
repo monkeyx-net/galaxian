@@ -43,6 +43,7 @@ add_library(galaxian_core STATIC
   src/gfx/enhance.c
   src/gfx/debugfont.c
   src/gfx/galaxian.c
+  src/platform/screen.c
   src/emu/z80.c
   src/emu/board.c
   src/emu/sound.c
@@ -131,6 +132,9 @@ enable_testing()
 add_executable(test_enhance src/tests/test_enhance.c)
 target_link_libraries(test_enhance PRIVATE galaxian_core)
 add_test(NAME enhance COMMAND test_enhance)
+add_executable(test_screen src/tests/test_screen.c)
+target_link_libraries(test_screen PRIVATE galaxian_core)
+add_test(NAME screen COMMAND test_screen)
 add_executable(test_z80 src/tests/test_z80.c)
 target_link_libraries(test_z80 PRIVATE galaxian_core)
 add_test(NAME z80 COMMAND test_z80)

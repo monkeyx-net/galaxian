@@ -76,9 +76,12 @@ emulated board. `--input script.txt` replays controls (lines of
   `--input`, `--frames`, `--screenshot`, `--rom`, `--check-rom`,
   `--dump-rom`, `--extract`
 - `platform/` - the only code that includes SDL: `video.c` (224x256
-  portrait framebuffer, integer scaling or fitted with sharp bilinear,
-  scanlines down the screen), `input.c` (Galaxian's control panel; pads
-  and keyboard), `audio.c` (streams generated samples)
+  portrait framebuffer, laid out by `screen.c`: integer scaling, fitted
+  with sharp bilinear or stretched, turned 0/90/270; scanlines down the
+  arcade's picture), `input.c` (Galaxian's control panel; pads and
+  keyboard, turned with the screen), `audio.c` (streams generated
+  samples); `screen.c` has no SDL (the scale modes, the rotation, the
+  turned joystick)
 - `gfx/` - draws into the framebuffer in arcade coordinates (`fb.scale` > 1
   for HD): `fb.c`, `blit.c`, `scale.c` (Scale2x/3x, xBR), `enhance.c`
   (graphics presets, HD image registry, whole-frame filter, glow),
@@ -124,6 +127,8 @@ emulated board. `--input script.txt` replays controls (lines of
 Every change keeps `ctest` green.
 
 - `enhance` - always runs (scalers, presets, glow)
+- `screen` - always runs: the scale modes and rotations laid out on the
+  devices' screens, the joystick turned with the picture
 - `rom_load` - label `rom`: loads the set from the zip, from renamed copies
   in a folder (CRC matching), and fails cleanly on an empty folder
 - `extract` - label `rom`: two extractions are byte-identical; the tiles,

@@ -2,11 +2,14 @@
 
 #include <SDL.h>
 
+#include "platform/screen.h"
+
 #define STICK_DEAD_ZONE 12000
 
 static SDL_GameController *pads[MAX_PADS];
 static int quit_hold;
-static bool gfx_was_held[3], menu_was_held;
+static bool gfx_was_held[5], menu_was_held;
+static int rotate;
 static bool quit_requested;
 
 static void open_pad(int index)
@@ -28,6 +31,11 @@ static void close_pad(SDL_JoystickID id)
             pads[i] = NULL;
         }
     }
+}
+
+void input_set_rotation(int degrees)
+{
+    rotate = degrees;
 }
 
 void input_init(void)
@@ -95,8 +103,7 @@ void input_poll(InputFrame *out)
         in.fire |= SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_A) ||
                    SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_B);
     }
-    in.move_x = clamp1(in.move_x);
-    in.move_y = clamp1(in.move_y);
+    screen_turn_input(rotate, clamp1(in.move_x), clamp1(in.move_y), &in.move_x, &in.move_y);
 
     /* Select+Start held 1 s quits; until then neither counts as coin/start. */
     if (select_held && start_held) {
@@ -108,11 +115,14 @@ void input_poll(InputFrame *out)
         else in.start |= start_held;
     }
 
-    bool gfx_held[3] = { (select_held && l1_held) || k[SDL_SCANCODE_F3], k[SDL_SCANCODE_F4], k[SDL_SCANCODE_F5] };
+    bool gfx_held[5] = { (select_held && l1_held) || k[SDL_SCANCODE_F3], k[SDL_SCANCODE_F4], k[SDL_SCANCODE_F5],
+                         k[SDL_SCANCODE_F6], k[SDL_SCANCODE_F7] };
     in.gfx_next = gfx_held[0] && !gfx_was_held[0];
     in.gfx_glow = gfx_held[1] && !gfx_was_held[1];
     in.gfx_scanlines = gfx_held[2] && !gfx_was_held[2];
-    for (int i = 0; i < 3; i++) gfx_was_held[i] = gfx_held[i];
+    in.screen_mode = gfx_held[3] && !gfx_was_held[3];
+    in.screen_rotate = gfx_held[4] && !gfx_was_held[4];
+    for (int i = 0; i < 5; i++) gfx_was_held[i] = gfx_held[i];
     bool menu_held = (select_held && r1_held) || k[SDL_SCANCODE_F2];
     in.menu = menu_held && !menu_was_held;
     menu_was_held = menu_held;

@@ -12,7 +12,8 @@ DIP switches and high-score saving, in $GALAXIAN_SAVE_DIR, else
 $XDG_DATA_HOME/galaxian, %APPDATA%\galaxian on Windows, or
 ~/.local/share/galaxian:
   galaxian.cfg      coinage, bonus ship, lives, cabinet (upright or
-                    cocktail: player two's turns turned round)
+                    cocktail: player two's turns turned round), the
+                    screen's scale mode and rotation
   galaxian.hiscore  the high score (the arcade forgets it at power-off)
 ./galaxian --test-card shows the ROM status and an input tester.
 The game reads its tiles, palette and tables from assets/ next to the
@@ -35,8 +36,15 @@ Controls (one control panel: the players take turns, as on the cabinet)
   Coin: Select / 5
   Start: Start / 1 or Enter;  2-player start: L1+Start / 2
   Graphics: Select+L1 / F3 steps the presets, F4 glow, F5 CRT scanlines
+  Screen: F6 scale mode, F7 rotation (also in the operator menu)
   Exit: hold Select+Start for 1 second / Esc
   Every connected pad drives the panel.
+
+Screen (--scale <mode>, --rotate <degrees>)
+  auto (an integer scale when it fills the screen, else fitted), integer,
+  fit, stretch. --rotate 90 or 270 turns the picture (clockwise) for a
+  landscape device held on its side; the joystick turns with it. Saved in
+  galaxian.cfg when changed in the game.
 
 Graphics presets (--gfx <preset>)
   classic, classic-crt, crisp, smooth, hd-crisp, hd-smooth, hd-glow, hd-glow-crt
