@@ -3,6 +3,19 @@
 ---
 ## Changelog
 
+### v0.2.3 (2026-10-25)
+
+#### Port
+
+- **Screen scaling and rotation** — `--scale auto|integer|fit|stretch`
+  (auto as before: an integer scale when it fills the screen, else fitted
+  with sharp bilinear) and `--rotate 0|90|270` for a landscape device held
+  on its side, the joystick turned with the picture; F6, F7 or the
+  operator menu change them, saved to `galaxian.cfg`. Turned, 640x480 gets an
+  exact 2x and 1280x720 an exact 3x.
+- **Window size** — `--windowed` opens at the largest integer scale that
+  fits the desktop.
+
 ### v0.2.2 (2026-10-23)
 
 #### Port

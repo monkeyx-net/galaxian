@@ -1,7 +1,7 @@
 # Native SDL2 Galaxian for Linux handhelds and desktops (aarch64, x86_64),
 # Windows (MinGW), macOS and the web (Emscripten). See GALAXIAN_PORT_PLAN.md.
 cmake_minimum_required(VERSION 3.13)
-project(galaxian VERSION 0.2.2 LANGUAGES C)
+project(galaxian VERSION 0.2.3 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
